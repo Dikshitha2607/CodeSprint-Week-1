@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Table Tennis Game</title>
+    <link rel="stylesheet" href="index.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="top-bar">
+        <div class="scoreboard" aria-label="Scoreboard">
+          <span class="player-name">Player 1</span>
+          <span id="scoreP1" class="score-value">0</span>
+          <span class="divider">|</span>
+          <span id="scoreP2" class="score-value">0</span>
+          <span class="player-name">Player 2</span>
+        </div>
+        <button id="startButton" class="start-button" type="button">Start / Restart</button>
+      </header>
+
+      <section id="game-board" class="game-board" aria-label="Table tennis game area">
+        <div class="center-line" aria-hidden="true"></div>
+        <div id="paddleLeft" class="paddle left" aria-label="Player 1 paddle"></div>
+        <div id="paddleRight" class="paddle right" aria-label="Player 2 paddle"></div>
+        <div id="ball" class="ball" aria-label="Ball"></div>
+        <div id="message" class="message hidden" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const board = document.getElementById('game-board');
+        const ballEl = document.getElementById('ball');
+        const leftPaddleEl = document.getElementById('paddleLeft');
+        const rightPaddleEl = document.getElementById('paddleRight');
+        const scoreP1El = document.getElementById('scoreP1');
+        const scoreP2El = document.getElementById('scoreP2');
+        const startButton = document.getElementById('startButton');
+        const messageEl = document.getElementById('message');
+
+        const WINNING_SCORE = 5;
+        const paddleWidth = 14;
+        const paddleHeight = 110;
+        const paddleOffset = 18;
+        const paddleSpeed = 520;
+
+        const leftPaddle = {
+          x: 0,
+          y: 0,
+          width: paddleWidth,
+          height: paddleHeight,
+        };
+
+        const rightPaddle = {
+          x: 0,
+          y: 0,
+          width: paddleWidth,
+          height: paddleHeight,
+        };
+
+        const ball = {
+          x: 0,
+          y: 0,
+          radius: 10,
+          vx: 0,
+          vy: 0,
+        };
+
+        const keys = {
+          KeyW: false,
+          KeyS: false,
+          ArrowUp: false,
+          ArrowDown: false,
+        };
+
+        const state = {
+          running: false,
+          winner: null,
+          scores: { p1: 0, p2: 0 },
+          lastTime: 0,
+        };
+        function setKeyState(code, pressed) {
+        const c = String(code).toLowerCase();
+        if (c === 'keyw' || c === 'w') {
+            keys.KeyW = pressed;
+        }
+        if (c === 'keys' || c === 's') {
+            keys.KeyS = pressed;
+        }
+        if (code === 'ArrowUp') {
+            keys.ArrowUp = pressed;
+        }
+        if (code === 'ArrowDown') {
+            keys.ArrowDown = pressed;
+        }
+        }
+        /**
+        function setKeyState(code, pressed) {
+          if (code === 'KeyW' || code === 'w' || code === 'W') {
+            keys.KeyW = pressed;
+          }
+          if (code === 'KeyS' || code === 's' || code === 'S') {
+            keys.KeyS = pressed;
+          }
+          if (code === 'ArrowUp') {
+            keys.ArrowUp = pressed;
+          }
+          if (code === 'ArrowDown') {
+            keys.ArrowDown = pressed;
+          }
+        }
+**/
+        function getBoardSize() {
+          return {
+            width: board.clientWidth,
+            height: board.clientHeight,
+          };
+        }
+
+        function clamp(value, min, max) {
+          return Math.min(Math.max(value, min), max);
+        }
+
+        function updateScoreboard() {
+          scoreP1El.textContent = state.scores.p1;
+          scoreP2El.textContent = state.scores.p2;
+        }
+
+        function resetPaddles() {
+          const size = getBoardSize();
+          leftPaddle.x = paddleOffset;
+          rightPaddle.x = size.width - paddleOffset - rightPaddle.width;
+          leftPaddle.y = (size.height - leftPaddle.height) / 2;
+          rightPaddle.y = (size.height - rightPaddle.height) / 2;
+        }
+
+        function resetBall(direction = Math.random() < 0.5 ? -1 : 1) {
+          const size = getBoardSize();
+          const angle = (Math.random() * 1.1) - 0.55;
+          const speed = 420;
+
+          ball.x = size.width / 2;
+          ball.y = size.height / 2;
+          ball.vx = Math.cos(angle) * speed * direction;
+          ball.vy = Math.sin(angle) * speed;
+        }
+
+        function render() {
+          const size = getBoardSize();
+
+          leftPaddleEl.style.width = `${leftPaddle.width}px`;
+          leftPaddleEl.style.height = `${leftPaddle.height}px`;
+          leftPaddleEl.style.left = `${leftPaddle.x}px`;
+          leftPaddleEl.style.top = `${leftPaddle.y}px`;
+
+          rightPaddleEl.style.width = `${rightPaddle.width}px`;
+          rightPaddleEl.style.height = `${rightPaddle.height}px`;
+          rightPaddleEl.style.left = `${rightPaddle.x}px`;
+          rightPaddleEl.style.top = `${rightPaddle.y}px`;
+
+          ballEl.style.width = `${ball.radius * 2}px`;
+          ballEl.style.height = `${ball.radius * 2}px`;
+          ballEl.style.left = `${ball.x - ball.radius}px`;
+          ballEl.style.top = `${ball.y - ball.radius}px`;
+
+          if (ball.x < 0 || ball.x > size.width || ball.y < 0 || ball.y > size.height) {
+            ballEl.style.left = `${clamp(ball.x - ball.radius, 0, size.width - ball.radius * 2)}px`;
+            ballEl.style.top = `${clamp(ball.y - ball.radius, 0, size.height - ball.radius * 2)}px`;
+          }
+        }
+
+        function showMessage(text) {
+          messageEl.textContent = text;
+          messageEl.classList.remove('hidden');
+        }
+
+        function hideMessage() {
+          messageEl.classList.add('hidden');
+        }
+
+        function endGame(winner) {
+          state.running = false;
+          state.winner = winner;
+          showMessage(winner === 'p1' ? 'Player 1 wins!' : 'Player 2 wins!');
+        }
+
+        function scorePoint(player) {
+          state.scores[player] += 1;
+          updateScoreboard();
+
+          if (state.scores[player] >= WINNING_SCORE) {
+            endGame(player);
+            return;
+          }
+
+          const serveDirection = player === 'p1' ? 1 : -1;
+          resetBall(serveDirection);
+        }
+
+        function handlePaddleCollision(paddle, relativeSide) {
+          const paddleTop = paddle.y;
+          const paddleBottom = paddle.y + paddle.height;
+
+          if (
+            ball.y + ball.radius >= paddleTop &&
+            ball.y - ball.radius <= paddleBottom &&
+            ((relativeSide === 'left' && ball.vx < 0 && ball.x - ball.radius <= paddle.x + paddle.width) ||
+              (relativeSide === 'right' && ball.vx > 0 && ball.x + ball.radius >= paddle.x))
+          ) {
+            const impactPoint = (ball.y - (paddle.y + paddle.height / 2)) / (paddle.height / 2);
+            const angle = impactPoint * (Math.PI / 3);
+            const currentSpeed = Math.min(Math.hypot(ball.vx, ball.vy) * 1.08, 980);
+            const direction = ball.vx < 0 ? 1 : -1;
+
+            ball.vx = direction * Math.cos(angle) * currentSpeed;
+            ball.vy = Math.sin(angle) * currentSpeed;
+
+            if (relativeSide === 'left') {
+              ball.x = paddle.x + paddle.width + ball.radius;
+            } else {
+              ball.x = paddle.x - ball.radius;
+            }
+          }
+        }
+
+        function updatePlayerMovement(dt) {
+          const size = getBoardSize();
+
+          if (keys.KeyW) {
+            leftPaddle.y -= paddleSpeed * dt;
+          }
+          if (keys.KeyS) {
+            leftPaddle.y += paddleSpeed * dt;
+          }
+          if (keys.ArrowUp) {
+            rightPaddle.y -= paddleSpeed * dt;
+          }
+          if (keys.ArrowDown) {
+            rightPaddle.y += paddleSpeed * dt;
+          }
+
+          leftPaddle.y = clamp(leftPaddle.y, 0, size.height - leftPaddle.height);
+          rightPaddle.y = clamp(rightPaddle.y, 0, size.height - rightPaddle.height);
+        }
+
+        function updateBall(dt) {
+          const size = getBoardSize();
+
+          ball.x += ball.vx * dt;
+          ball.y += ball.vy * dt;
+
+          if (ball.y - ball.radius <= 0) {
+            ball.y = ball.radius;
+            ball.vy = Math.abs(ball.vy);
+          }
+
+          if (ball.y + ball.radius >= size.height) {
+            ball.y = size.height - ball.radius;
+            ball.vy = -Math.abs(ball.vy);
+          }
+
+          if (ball.x - ball.radius <= 0) {
+            scorePoint('p2');
+            return;
+          }
+
+          if (ball.x + ball.radius >= size.width) {
+            scorePoint('p1');
+            return;
+          }
+
+          handlePaddleCollision(leftPaddle, 'left');
+          handlePaddleCollision(rightPaddle, 'right');
+        }
+
+        function update(dt) {
+          if (!state.running) {
+            return;
+          }
+
+          updatePlayerMovement(dt);
+          updateBall(dt);
+        }
+
+        function gameLoop(timestamp) {
+          const dt = Math.min((timestamp - state.lastTime) / 1000 || 0.016, 0.033);
+          state.lastTime = timestamp;
+
+          update(dt);
+          render();
+          requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+          state.running = true;
+          state.winner = null;
+          hideMessage();
+          resetPaddles();
+          resetBall(Math.random() < 0.5 ? -1 : 1);
+        }
+
+        function resetGame() {
+          state.scores.p1 = 0;
+          state.scores.p2 = 0;
+          state.running = true;
+          state.winner = null;
+          hideMessage();
+          updateScoreboard();
+          resetPaddles();
+          resetBall(Math.random() < 0.5 ? -1 : 1);
+        }
+
+        window.addEventListener('keydown', (event) => {
+          const code = event.code || event.key;
+          setKeyState(code, true);
+
+          if (code === 'KeyW' || code === 'KeyS' || code === 'ArrowUp' || code === 'ArrowDown') {
+            event.preventDefault();
+          }
+        });
+
+        window.addEventListener('keyup', (event) => {
+          const code = event.code || event.key;
+          setKeyState(code, false);
+        });
+
+        window.addEventListener('blur', () => {
+          keys.KeyW = false;
+          keys.KeyS = false;
+          keys.ArrowUp = false;
+          keys.ArrowDown = false;
+        });
+
+        window.addEventListener('resize', () => {
+          const size = getBoardSize();
+          leftPaddle.x = clamp(leftPaddle.x, 0, size.width - leftPaddle.width - paddleOffset);
+          rightPaddle.x = clamp(rightPaddle.x, 0, size.width - rightPaddle.width - paddleOffset);
+          leftPaddle.y = clamp(leftPaddle.y, 0, size.height - leftPaddle.height);
+          rightPaddle.y = clamp(rightPaddle.y, 0, size.height - rightPaddle.height);
+          ball.x = clamp(ball.x, ball.radius, size.width - ball.radius);
+          ball.y = clamp(ball.y, ball.radius, size.height - ball.radius);
+          render();
+        });
+
+        startButton.addEventListener('click', () => {
+          resetGame();
+        });
+
+        resetPaddles();
+        updateScoreboard();
+        resetBall();
+        render();
+        requestAnimationFrame(gameLoop);
+      })();
+    </script>
+  </body>
+</html>
