@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  --bg-color: #06141f;
+  --panel-color: #0d1f2c;
+  --panel-accent: #163043;
+  --line-color: rgba(255, 255, 255, 0.26);
+  --text-color: #edf5ff;
+  --paddle-color: #e4f0ff;
+  --ball-color: #f5f7ff;
+  --button-color: #6ee7b7;
+  --button-text: #052a1f;
+  --message-bg: rgba(5, 12, 18, 0.75);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  height: 100%;
+  font-family: Arial, Helvetica, sans-serif;
+  background: radial-gradient(circle at top, #12283b 0%, var(--bg-color) 52%);
+  color: var(--text-color);
+}
+
+body {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+@media (max-width: 640px) {
+  body {
+    padding: 18px;
+  }
+}
