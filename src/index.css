@@ -1,40 +1,87 @@
 @import "tailwindcss";
 
-:root {
-  --bg-color: #06141f;
-  --panel-color: #0d1f2c;
-  --panel-accent: #163043;
-  --line-color: rgba(255, 255, 255, 0.26);
-  --text-color: #edf5ff;
-  --paddle-color: #e4f0ff;
-  --ball-color: #f5f7ff;
-  --button-color: #6ee7b7;
-  --button-text: #052a1f;
-  --message-bg: rgba(5, 12, 18, 0.75);
-}
+@layer base {
+  :root {
+    --bg-dark: #0d1117;
+    --card-dark: #161b22;
+    --card-border: #30363d;
+    --p1-accent: #58a6ff;
+    --p2-accent: #f85149;
+    --text-primary: #ffffff;
+    --text-secondary: #c9d1d9;
+    --text-muted: #8b949e;
+    --status-green: #238636;
+    --status-neon: #00ff85;
+  }
 
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  margin: 0;
-  min-height: 100%;
-  height: 100%;
-  font-family: Arial, Helvetica, sans-serif;
-  background: radial-gradient(circle at top, #12283b 0%, var(--bg-color) 52%);
-  color: var(--text-color);
-}
-
-body {
-  display: grid;
-  place-items: center;
-  padding: 24px;
-}
-
-@media (max-width: 640px) {
-  body {
-    padding: 18px;
+  html, body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
   }
 }
+
+.font-mono-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Glassmorphism & Card styling */
+.glass-card {
+  background-color: rgba(22, 27, 34, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(48, 54, 61, 0.8);
+}
+
+.glass-card-hover {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card-hover:hover {
+  border-color: rgba(88, 166, 255, 0.4);
+  box-shadow: 0 8px 24px -6px rgba(88, 166, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+/* Custom glow effects */
+.glow-p1 {
+  box-shadow: 0 0 20px rgba(88, 166, 255, 0.35);
+}
+
+.glow-p2 {
+  box-shadow: 0 0 20px rgba(248, 81, 73, 0.35);
+}
+
+.glow-green {
+  box-shadow: 0 0 15px rgba(0, 255, 133, 0.4);
+}
+
+/* Pulse animation for active indicators */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.95); }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 2.5s infinite ease-in-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0d1117;
+}
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #8b949e;
+}
+
