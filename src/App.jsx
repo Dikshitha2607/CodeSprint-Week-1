@@ -594,31 +594,168 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
     return null;
   };
 
-  const chooseAiMove = () => {
-    const availableCols = [];
-    for (let col = 0; col < COLS; col++) {
-      if (getAvailableRow(grid, col) !== -1) availableCols.push(col);
+  const getWinner = (g) => {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const color = g[r][c];
+        if (!color) continue;
+        if (hasConnectFour(g, r, c, color)) return color;
+      }
     }
-    if (!availableCols.length) return null;
+    return null;
+  };
+
+  const boardHeuristic = (g) => {
+    const aiColor = 'Yellow';
+    const humanColor = 'Red';
+    const winner = getWinner(g);
+    if (winner === aiColor) return 1000000;
+    if (winner === humanColor) return -1000000;
+
+    let score = 0;
+    const centerCol = [g[0][3], g[1][3], g[2][3], g[3][3], g[4][3], g[5][3]];
+    score += centerCol.filter((cell) => cell === aiColor).length * 12;
+    score -= centerCol.filter((cell) => cell === humanColor).length * 12;
+
+    const columnWeights = [3, 4, 5, 7, 5, 4, 3];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = g[r][c];
+        if (cell === aiColor) score += columnWeights[c];
+        if (cell === humanColor) score -= columnWeights[c];
+      }
+    }
+
+    const winningMovesAi = findImmediateWinningCol(g, aiColor);
+    const winningMovesHuman = findImmediateWinningCol(g, humanColor);
+    if (winningMovesAi !== null) score += 500;
+    if (winningMovesHuman !== null) score -= 650;
+
+    const lines = [];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS - 3; c++) {
+        lines.push([g[r][c], g[r][c + 1], g[r][c + 2], g[r][c + 3]]);
+      }
+    }
+    for (let c = 0; c < COLS; c++) {
+      for (let r = 0; r < ROWS - 3; r++) {
+        lines.push([g[r][c], g[r + 1][c], g[r + 2][c], g[r + 3][c]]);
+      }
+    }
+    for (let r = 0; r < ROWS - 3; r++) {
+      for (let c = 0; c < COLS - 3; c++) {
+        lines.push([g[r][c], g[r + 1][c + 1], g[r + 2][c + 2], g[r + 3][c + 3]]);
+      }
+    }
+    for (let r = 3; r < ROWS; r++) {
+      for (let c = 0; c < COLS - 3; c++) {
+        lines.push([g[r][c], g[r - 1][c + 1], g[r - 2][c + 2], g[r - 3][c + 3]]);
+      }
+    }
+
+    for (const line of lines) {
+      const aiCount = line.filter((cell) => cell === aiColor).length;
+      const humanCount = line.filter((cell) => cell === humanColor).length;
+      const emptyCount = line.filter((cell) => cell === null).length;
+
+      if (aiCount > 0 && humanCount > 0) continue;
+      if (aiCount === 4) score += 120000;
+      else if (humanCount === 4) score -= 120000;
+      else if (aiCount === 3 && emptyCount === 1) score += 160;
+      else if (humanCount === 3 && emptyCount === 1) score -= 180;
+      else if (aiCount === 2 && emptyCount === 2) score += 26;
+      else if (humanCount === 2 && emptyCount === 2) score -= 32;
+      else if (aiCount === 1 && emptyCount === 3) score += 4;
+      else if (humanCount === 1 && emptyCount === 3) score -= 5;
+    }
+
+    const validCols = [];
+    for (let col = 0; col < COLS; col++) {
+      if (getAvailableRow(g, col) !== -1) validCols.push(col);
+    }
+
+    for (const col of validCols) {
+      const row = getAvailableRow(g, col);
+      const trial = g.map((r) => [...r]);
+      trial[row][col] = aiColor;
+      if (hasConnectFour(trial, row, col, aiColor)) score += 200;
+      const afterHuman = g.map((r) => [...r]);
+      afterHuman[row][col] = humanColor;
+      if (hasConnectFour(afterHuman, row, col, humanColor)) score -= 180;
+    }
+
+    return score;
+  };
+
+  const minimax = (boardState, depth, alpha, beta, maximizingPlayer) => {
+    const winner = getWinner(boardState);
+    if (winner === 'Yellow') return 100000 + depth;
+    if (winner === 'Red') return -100000 - depth;
+    if (depth === 0) return boardHeuristic(boardState);
+
+    const validCols = [3, 2, 4, 1, 5, 0, 6].filter((col) => getAvailableRow(boardState, col) !== -1);
+    if (!validCols.length) return boardHeuristic(boardState);
+
+    if (maximizingPlayer) {
+      let bestScore = -Infinity;
+      for (const col of validCols) {
+        const row = getAvailableRow(boardState, col);
+        const nextBoard = boardState.map((r) => [...r]);
+        nextBoard[row][col] = 'Yellow';
+        const score = minimax(nextBoard, depth - 1, alpha, beta, false);
+        bestScore = Math.max(bestScore, score);
+        alpha = Math.max(alpha, score);
+        if (beta <= alpha) break;
+      }
+      return bestScore;
+    }
+
+    let bestScore = Infinity;
+    for (const col of validCols) {
+      const row = getAvailableRow(boardState, col);
+      const nextBoard = boardState.map((r) => [...r]);
+      nextBoard[row][col] = 'Red';
+      const score = minimax(nextBoard, depth - 1, alpha, beta, true);
+      bestScore = Math.min(bestScore, score);
+      beta = Math.min(beta, score);
+      if (beta <= alpha) break;
+    }
+    return bestScore;
+  };
+
+  const chooseAiMove = () => {
+    const validCols = [3, 2, 4, 1, 5, 0, 6].filter((col) => getAvailableRow(grid, col) !== -1);
+    if (!validCols.length) return null;
 
     const immediateWin = findImmediateWinningCol(grid, 'Yellow');
     if (immediateWin !== null) return immediateWin;
 
-    const blockCol = findImmediateWinningCol(grid, 'Red');
-    if (blockCol !== null) return blockCol;
+    const immediateBlock = findImmediateWinningCol(grid, 'Red');
+    if (immediateBlock !== null) return immediateBlock;
 
-    const centerOrder = [3, 2, 4, 1, 5, 0, 6];
-    const strategicChoice = centerOrder.find((col) => getAvailableRow(grid, col) !== -1);
-
-    if (Math.random() < aiDifficulty) {
-      return strategicChoice !== undefined ? strategicChoice : availableCols[Math.floor(Math.random() * availableCols.length)];
+    const depth = aiDifficulty < 0.45 ? 3 : aiDifficulty < 0.75 ? 4 : 5;
+    if (Math.random() < (1 - aiDifficulty) * 0.5) {
+      return validCols[Math.floor(Math.random() * validCols.length)];
     }
 
-    if (Math.random() < 0.45) {
-      return availableCols[Math.floor(Math.random() * availableCols.length)];
+    let bestScore = -Infinity;
+    let bestMove = validCols[0];
+    let alpha = -Infinity;
+    let beta = Infinity;
+
+    for (const col of validCols) {
+      const row = getAvailableRow(grid, col);
+      const nextBoard = grid.map((r) => [...r]);
+      nextBoard[row][col] = 'Yellow';
+      const score = minimax(nextBoard, depth - 1, alpha, beta, false);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = col;
+      }
+      alpha = Math.max(alpha, score);
     }
 
-    return strategicChoice !== undefined ? strategicChoice : availableCols[Math.floor(Math.random() * availableCols.length)];
+    return bestMove;
   };
 
   useEffect(() => {
