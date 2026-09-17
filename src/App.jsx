@@ -525,25 +525,34 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
   const [grid, setGrid] = useState(Array(ROWS).fill(null).map(() => Array(COLS).fill(null)));
   const [selectedCol, setSelectedCol] = useState(3);
   const [winner, setWinner] = useState(null);
+  const [aiThinking, setAiThinking] = useState(false);
+  const [aiDifficulty, setAiDifficulty] = useState(0.35);
+  const [playerWins, setPlayerWins] = useState(0);
 
   useEffect(() => {
     resetGame();
   }, [restartCounter]);
 
-  const dropDisc = (col) => {
-    if (winner || isPaused) return;
+  const getAvailableRow = (g, col) => {
     for (let r = ROWS - 1; r >= 0; r--) {
-      if (!grid[r][col]) {
-        const nextGrid = grid.map((row) => [...row]);
-        nextGrid[r][col] = 'Red';
-        setGrid(nextGrid);
-        checkWin(nextGrid, r, col, 'Red');
-        break;
-      }
+      if (!g[r][col]) return r;
     }
+    return -1;
   };
 
-  const checkWin = (g, r, c, color) => {
+  const dropDisc = (col, color) => {
+    if (winner || isPaused || col < 0 || col >= COLS) return false;
+    const row = getAvailableRow(grid, col);
+    if (row === -1) return false;
+
+    const nextGrid = grid.map((r) => [...r]);
+    nextGrid[row][col] = color;
+    setGrid(nextGrid);
+    checkWin(nextGrid, row, col, color);
+    return true;
+  };
+
+  const hasConnectFour = (g, r, c, color) => {
     const directions = [
       [[0, 1], [0, -1]],
       [[1, 0], [-1, 0]],
@@ -561,12 +570,88 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
           nc += dc;
         }
       }
-      if (count >= 4) {
-        setWinner(color);
+      if (count >= 4) return true;
+    }
+    return false;
+  };
+
+  const checkWin = (g, r, c, color) => {
+    if (hasConnectFour(g, r, c, color)) {
+      setWinner(color);
+      return true;
+    }
+    return false;
+  };
+
+  const findImmediateWinningCol = (g, color) => {
+    for (let col = 0; col < COLS; col++) {
+      const row = getAvailableRow(g, col);
+      if (row === -1) continue;
+      const nextGrid = g.map((r) => [...r]);
+      nextGrid[row][col] = color;
+      if (hasConnectFour(nextGrid, row, col, color)) return col;
+    }
+    return null;
+  };
+
+  const chooseAiMove = () => {
+    const availableCols = [];
+    for (let col = 0; col < COLS; col++) {
+      if (getAvailableRow(grid, col) !== -1) availableCols.push(col);
+    }
+    if (!availableCols.length) return null;
+
+    const immediateWin = findImmediateWinningCol(grid, 'Yellow');
+    if (immediateWin !== null) return immediateWin;
+
+    const blockCol = findImmediateWinningCol(grid, 'Red');
+    if (blockCol !== null) return blockCol;
+
+    const centerOrder = [3, 2, 4, 1, 5, 0, 6];
+    const strategicChoice = centerOrder.find((col) => getAvailableRow(grid, col) !== -1);
+
+    if (Math.random() < aiDifficulty) {
+      return strategicChoice !== undefined ? strategicChoice : availableCols[Math.floor(Math.random() * availableCols.length)];
+    }
+
+    if (Math.random() < 0.45) {
+      return availableCols[Math.floor(Math.random() * availableCols.length)];
+    }
+
+    return strategicChoice !== undefined ? strategicChoice : availableCols[Math.floor(Math.random() * availableCols.length)];
+  };
+
+  useEffect(() => {
+    if (!aiThinking || winner || isPaused) return;
+
+    const timer = setTimeout(() => {
+      const move = chooseAiMove();
+      if (move === null || winner) {
+        setAiThinking(false);
         return;
       }
-    }
-  };
+
+      const row = getAvailableRow(grid, move);
+      if (row === -1) {
+        setAiThinking(false);
+        return;
+      }
+
+      const nextGrid = grid.map((r) => [...r]);
+      nextGrid[row][move] = 'Yellow';
+      setGrid(nextGrid);
+
+      if (checkWin(nextGrid, row, move, 'Yellow')) {
+        setAiThinking(false);
+        setPlayerWins((prev) => Math.max(0, prev));
+        return;
+      }
+
+      setAiThinking(false);
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [aiThinking, grid, winner, isPaused, aiDifficulty]);
 
   useEffect(() => {
     if (!remoteAction || isPaused) return;
@@ -574,14 +659,45 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
     if (action === 'LEFT') setSelectedCol((prev) => (prev > 0 ? prev - 1 : COLS - 1));
     else if (action === 'RIGHT') setSelectedCol((prev) => (prev < COLS - 1 ? prev + 1 : 0));
     else if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'DOWN') {
-      dropDisc(selectedCol);
+      if (!aiThinking && !winner) {
+        const availableRow = getAvailableRow(grid, selectedCol);
+        if (availableRow !== -1) {
+          const nextGrid = grid.map((row) => [...row]);
+          nextGrid[availableRow][selectedCol] = 'Red';
+          setGrid(nextGrid);
+          if (checkWin(nextGrid, availableRow, selectedCol, 'Red')) return;
+          setAiThinking(true);
+        }
+      }
     }
-  }, [remoteAction, selectedCol, winner, grid, isPaused]);
+  }, [remoteAction, selectedCol, winner, grid, isPaused, aiThinking]);
+
+  const handlePlayerMove = (col) => {
+    if (aiThinking || winner || isPaused) return;
+    const row = getAvailableRow(grid, col);
+    if (row === -1) return;
+
+    const nextGrid = grid.map((r) => [...r]);
+    nextGrid[row][col] = 'Red';
+    setGrid(nextGrid);
+
+    const playerWon = checkWin(nextGrid, row, col, 'Red');
+    if (playerWon) {
+      setPlayerWins((prev) => prev + 1);
+      setAiDifficulty((prev) => Math.min(0.95, prev + 0.12 + playerWins * 0.03));
+      return;
+    }
+
+    setAiThinking(true);
+  };
 
   const resetGame = () => {
     setGrid(Array(ROWS).fill(null).map(() => Array(COLS).fill(null)));
     setWinner(null);
     setSelectedCol(3);
+    setAiThinking(false);
+    setAiDifficulty(0.35);
+    setPlayerWins(0);
   };
 
   return (
@@ -615,10 +731,10 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
                 key={`${rIdx}-${cIdx}`}
                 onClick={() => {
                   setSelectedCol(cIdx);
-                  dropDisc(cIdx);
+                  handlePlayerMove(cIdx);
                 }}
                 className={`w-10 h-10 rounded-full border border-[#30363d] flex items-center justify-center cursor-pointer transition-all ${
-                  cell === 'Red' ? 'bg-[#f85149] border-[#f85149] shadow-[0_0_12px_rgba(248,81,73,0.7)]' : 'bg-[#161b22]'
+                  cell === 'Red' ? 'bg-[#f85149] border-[#f85149] shadow-[0_0_12px_rgba(248,81,73,0.7)]' : cell === 'Yellow' ? 'bg-[#facc15] border-[#facc15] shadow-[0_0_12px_rgba(250,204,21,0.7)]' : 'bg-[#161b22]'
                 }`}
               />
             ))
