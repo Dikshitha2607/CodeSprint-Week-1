@@ -66,9 +66,11 @@ function freeSocketSlots(socket, roomCode) {
   if (!code || !rooms.has(code)) return;
   const room = rooms.get(code);
   let updated = false;
+  let freedSlot = null;
 
   ['p1', 'p2'].forEach((slotKey) => {
     if (room.players[slotKey] && room.players[slotKey].socketId === socket.id) {
+      freedSlot = slotKey;
       room.players[slotKey] = {
         slot: slotKey === 'p1' ? 1 : 2,
         role: slotKey === 'p1' ? 'Player 1' : 'Player 2',
@@ -86,6 +88,7 @@ function freeSocketSlots(socket, roomCode) {
   if (updated) {
     room.matchReady = room.isSolo ? room.players.p1.connected : (room.players.p1.connected && room.players.p2.connected);
     io.to(code).emit('room_updated', room);
+    io.to(code).emit('device_left', { slot: freedSlot, socketId: socket.id, roomCode: code });
     console.log(`[Socket.io] Cleared slot(s) for disconnected socket ${socket.id} in room ${code}`);
   }
 }

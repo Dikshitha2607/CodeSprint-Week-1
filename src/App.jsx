@@ -1043,11 +1043,37 @@ export default function App() {
       }
     });
 
+    socket.on('device_left', (data) => {
+      console.log('[Socket.io] Device left event received:', data);
+      const view = currentViewRef.current;
+      if (view === 'lobby' || view === 'arena' || view === 'game_play') {
+        console.log('[Room] Mobile controller device left room. Closing room and returning Host PC to landing page.');
+        setCurrentView('landing');
+        setRoomCode('');
+        setRoomState({
+          code: '',
+          isSolo: true,
+          players: {
+            p1: { slot: 1, role: 'Player 1', connected: false },
+            p2: { slot: 2, role: 'Player 2', connected: false }
+          },
+          matchReady: false
+        });
+      }
+    });
+
     socket.on('room_updated', (data) => {
       console.log('[Socket.io] Room update received:', data);
       if (data && data.code) {
         setRoomState(data);
         setRoomCode(data.code);
+
+        const view = currentViewRef.current;
+        if ((view === 'lobby' || view === 'arena' || view === 'game_play') && !data.players?.p1?.connected) {
+          console.log('[Room] P1 controller disconnected. Returning Host PC to landing page.');
+          setCurrentView('landing');
+          setRoomCode('');
+        }
       }
     });
 
@@ -1069,6 +1095,7 @@ export default function App() {
       socket.off('connect', handleConnect);
       socket.off('room_created');
       socket.off('room_updated');
+      socket.off('device_left');
       socket.off('diagnostics_result');
       if (codeGenTimerRef.current) {
         clearTimeout(codeGenTimerRef.current);
@@ -1464,9 +1491,18 @@ export default function App() {
             </div>
             <span className="font-bold text-[#ffffff] text-xs">Air Game Pad</span>
           </div>
-          <div className="flex items-center gap-1.5 text-[#00ff85] font-bold text-[11px]">
-            <span className="w-2 h-2 rounded-full bg-[#00ff85] animate-pulse"></span>
-            <span>CONNECTED</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-[#00ff85] font-bold text-[11px]">
+              <span className="w-2 h-2 rounded-full bg-[#00ff85] animate-pulse"></span>
+              <span>CONNECTED</span>
+            </div>
+            <button
+              onClick={handleLeaveRoom}
+              className="px-2 py-1 rounded-lg bg-[#f85149]/10 border border-[#f85149]/30 text-[#f85149] text-[10px] font-bold font-mono-code hover:bg-[#f85149]/20 transition-all cursor-pointer flex items-center gap-1"
+            >
+              <LogOut className="w-3 h-3" />
+              <span>Exit Room</span>
+            </button>
           </div>
         </header>
 
