@@ -46,9 +46,13 @@ const socket = io(BACKEND_URL, {
 // --- GAME 1: PING PONG ---
 function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
   const [paddleY, setPaddleY] = useState(50);
+  const [aiPaddleY, setAiPaddleY] = useState(50);
   const [ball, setBall] = useState({ x: 50, y: 50, vx: 1.2, vy: 0.8 });
   const [score, setScore] = useState(0);
+  const [aiDifficulty, setAiDifficulty] = useState(0.7);
   const [gameOver, setGameOver] = useState(false);
+
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
   useEffect(() => {
     resetGame();
@@ -94,11 +98,6 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
           newY = Math.max(5, Math.min(95, newY));
         }
 
-        if (newX >= 95) {
-          newVx = -Math.abs(prev.vx);
-          newX = 95;
-        }
-
         if (newX <= 8) {
           if (Math.abs(newY - paddleY) <= 18) {
             newVx = Math.abs(prev.vx) * 1.05;
@@ -109,17 +108,51 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
           }
         }
 
+        if (newX >= 92) {
+          if (Math.abs(newY - aiPaddleY) <= 18) {
+            newVx = -Math.abs(prev.vx) * 1.05;
+            newX = 92;
+            newVy += (newY - aiPaddleY) * 0.12;
+          } else {
+            setGameOver(true);
+          }
+        }
+
         return { x: newX, y: newY, vx: newVx, vy: newVy };
       });
     }, 30);
 
     return () => clearInterval(interval);
-  }, [paddleY, gameOver, isPaused]);
+  }, [paddleY, aiPaddleY, gameOver, isPaused]);
+
+  useEffect(() => {
+    if (gameOver || isPaused) return;
+
+    const aiSpeed = 0.8 + aiDifficulty * 1.35;
+    const trackingBias = Math.max(0, 16 - aiDifficulty * 8);
+    const predictedY = ball.y + ball.vy * (2.5 + aiDifficulty * 2.5);
+    const targetY = clamp(predictedY + (ball.vy >= 0 ? trackingBias * 0.2 : -trackingBias * 0.2), 10, 90);
+
+    setAiPaddleY((prev) => {
+      const diff = targetY - prev;
+      if (Math.abs(diff) < 3) {
+        return prev;
+      }
+      const step = Math.min(Math.abs(diff), aiSpeed);
+      return clamp(prev + (diff >= 0 ? step : -step), 10, 90);
+    });
+  }, [ball, aiDifficulty, gameOver, isPaused]);
+
+  useEffect(() => {
+    setAiDifficulty(Math.min(2.1, 0.7 + score * 0.08));
+  }, [score]);
 
   const resetGame = () => {
     setBall({ x: 50, y: 50, vx: 1.2, vy: 0.8 });
     setScore(0);
     setPaddleY(50);
+    setAiPaddleY(50);
+    setAiDifficulty(0.7);
     setGameOver(false);
   };
 
@@ -137,6 +170,11 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
         <div
           className="absolute left-[3%] w-4 h-24 bg-[#58a6ff] rounded-full shadow-[0_0_15px_rgba(88,166,255,0.8)] transition-all duration-75"
           style={{ top: `calc(${paddleY}% - 48px)` }}
+        ></div>
+
+        <div
+          className="absolute right-[3%] w-4 h-24 bg-[#f85149] rounded-full shadow-[0_0_15px_rgba(248,81,73,0.8)] transition-all duration-75"
+          style={{ top: `calc(${aiPaddleY}% - 48px)` }}
         ></div>
 
         <div
