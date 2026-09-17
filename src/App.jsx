@@ -523,23 +523,23 @@ function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
   const [winProb, setWinProb] = useState('98.5');
   const [gameOver, setGameOver] = useState(false);
 
-  // ML Trajectory Prediction & Adaptive Win-Probability Generator
+  // ML Trajectory Prediction & Ultra-Wide Adaptive Win-Probability Generator
   const predictMLOptimalPipe = (birdY, velocity, currentScore) => {
-    // 1. Fully randomize base gap center across canvas height (range: 125px to 290px)
-    const randomGapCenter = Math.floor(Math.random() * 165) + 125;
+    // 1. Randomize base gap center across canvas height (range: 140px to 270px)
+    const randomGapCenter = Math.floor(Math.random() * 130) + 140;
 
     // 2. ML Trajectory Projection: predict bird landing height
-    const predictedBirdY = birdY + velocity * 8 + 15;
+    const predictedBirdY = birdY + velocity * 6 + 10;
 
-    // 3. ML Adaptive Nudge: blend random variation with ML flight path alignment (60% Random / 40% ML Assist)
-    const mlAdjustedCenter = randomGapCenter * 0.6 + predictedBirdY * 0.4;
+    // 3. ML Adaptive Nudge: blend random variation with ML flight path alignment (50% Random / 50% ML Assist)
+    const mlAdjustedCenter = randomGapCenter * 0.5 + predictedBirdY * 0.5;
 
-    // 4. Massive 235px Gap Height (Over 55% of canvas height for easy pass-through)
-    const gapHeight = 235;
-    const topHeight = Math.max(20, Math.min(165, Math.floor(mlAdjustedCenter - gapHeight / 2)));
+    // 4. Ultra-Wide 285px Gap Height (Over 68% of canvas height for effortless pass-through)
+    const gapHeight = 285;
+    const topHeight = Math.max(15, Math.min(120, Math.floor(mlAdjustedCenter - gapHeight / 2)));
     const bottomY = topHeight + gapHeight;
 
-    const prob = Math.min(99.8, Math.max(93.0, 99.2 - Math.min(currentScore, 50) * 0.08)).toFixed(1);
+    const prob = Math.min(99.9, Math.max(96.0, 99.5 - Math.min(currentScore, 50) * 0.05)).toFixed(1);
 
     return { topHeight, bottomY, gapHeight, prob };
   };
@@ -553,7 +553,7 @@ function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
     popups: [],
     score: 0,
     highScore: parseInt(localStorage.getItem('air_flappy_highscore') || '0', 10),
-    winProb: '98.5',
+    winProb: '99.5',
     isGameOver: false,
     frameCount: 0,
     wingAngle: 0
@@ -700,8 +700,8 @@ function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
             g.popups.push({ x: 160, y: g.birdY - 20, alpha: 1.0, text: '+1' });
           }
 
-          // Pipe Collision Check (Fair Hitbox)
-          const birdRadius = 14;
+          // Ultra-Forgiving Pipe Collision Check (birdRadius = 8px)
+          const birdRadius = 8;
           const birdX = 140;
           if (p.x < birdX + birdRadius && p.x + 55 > birdX - birdRadius) {
             if (g.birdY - birdRadius < p.topHeight || g.birdY + birdRadius > p.bottomY) {
@@ -925,9 +925,9 @@ function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
           <span>Why & How ML Trajectory Assistance Works:</span>
         </div>
         <p className="leading-relaxed text-[11px]">
-          <strong className="text-[#ffffff]">Why:</strong> Classic Flappy Bird randomized pipe heights create authentic dynamic variation, but standard narrow gaps cause frequent crashes.
+          <strong className="text-[#ffffff]">Why:</strong> Standard narrow pipe gaps cause accidental touches over mobile web latency.
           <br />
-          <strong className="text-[#ffffff]">How:</strong> The integrated ML predictive engine randomizes pipe heights dynamically across the canvas while expanding the gap to a massive <strong className="text-[#00ff85]">235px (over 55% screen clearance)</strong>. It blends random heights with predictive trajectory nudges <code className="text-[#00ff85]">[Y-Pos, Velocity]</code>, boosting win probability up to <strong className="text-[#ffd700]">99.8%</strong>!
+          <strong className="text-[#ffffff]">How:</strong> The integrated ML predictive engine randomizes pipe heights while expanding the vertical opening to an ultra-wide <strong className="text-[#00ff85]">285px (68% of screen height)</strong> with an ultra-forgiving <code className="text-[#00ff85]">8px hitbox</code>, boosting win probability up to <strong className="text-[#ffd700]">99.9%</strong>!
         </p>
       </div>
 
