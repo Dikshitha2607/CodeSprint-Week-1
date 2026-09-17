@@ -1069,8 +1069,8 @@ export default function App() {
         setRoomCode(data.code);
 
         const view = currentViewRef.current;
-        if ((view === 'lobby' || view === 'arena' || view === 'game_play') && !data.players?.p1?.connected) {
-          console.log('[Room] P1 controller disconnected. Returning Host PC to landing page.');
+        if ((view === 'arena' || view === 'game_play') && !data.players?.p1?.connected) {
+          console.log('[Room] P1 controller disconnected during active gaming session. Returning Host PC to landing page.');
           setCurrentView('landing');
           setRoomCode('');
         }
