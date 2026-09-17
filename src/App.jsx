@@ -29,7 +29,11 @@ import {
   Lock,
   WifiOff,
   Check,
-  Loader2
+  Loader2,
+  Upload,
+  FileText,
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 
 // Connect to Socket.IO backend server (Render deployment URL vs Localhost fallback)
@@ -166,50 +170,168 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
 
 // --- GAME 2: QUIZ ---
 function QuizGame({ remoteAction, isPaused, restartCounter, onExit }) {
-  const QUESTIONS = [
-    { question: 'What protocol does Air Game Pad use for real-time streaming?', options: ['HTTP Long Polling', 'WebSockets Stream', 'FTP Server', 'MQTT Broker'], answer: 1 },
-    { question: 'What does CPU stand for?', options: ['Central Processing Unit', 'Computer Power Utility', 'Core Performance Control', 'Control Packet Unit'], answer: 0 },
-    { question: 'What is the default port for Vite local dev server?', options: ['3000', '8080', '5173', '4000'], answer: 2 },
-    { question: 'Which game uses a 3x3 grid?', options: ['Connect 4', 'Chess', 'Tic Tac Toe', 'Ping Pong'], answer: 2 },
-    { question: 'How many discs in a row win Connect 4?', options: ['3 Discs', '4 Discs', '5 Discs', '6 Discs'], answer: 1 },
+  const DEFAULT_QUESTIONS = [
+    { question: 'What protocol does Air Game Pad use for real-time streaming?', options: ['HTTP Long Polling', 'WebSockets Stream', 'FTP Server', 'MQTT Broker'], answer: 1, explanation: 'WebSockets Stream delivers ultra-low sub-8ms latency.' },
+    { question: 'What does CPU stand for?', options: ['Central Processing Unit', 'Computer Power Utility', 'Core Performance Control', 'Control Packet Unit'], answer: 0, explanation: 'Central Processing Unit executes instructions.' },
+    { question: 'What is the default port for Vite local dev server?', options: ['3000', '8080', '5173', '4000'], answer: 2, explanation: 'Vite uses port 5173 by default.' },
+    { question: 'Which game uses a 3x3 grid?', options: ['Connect 4', 'Chess', 'Tic Tac Toe', 'Ping Pong'], answer: 2, explanation: 'Tic Tac Toe is played on a 3x3 grid.' },
+    { question: 'How many discs in a row win Connect 4?', options: ['3 Discs', '4 Discs', '5 Discs', '6 Discs'], answer: 1, explanation: 'Connecting 4 discs in a line wins the game.' },
   ];
+
+  // Flow State: 'UPLOAD' | 'QUIZ' | 'COMPLETED'
+  const [gameState, setGameState] = useState('UPLOAD');
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
 
   const [currentIdx, setCurrentIdx] = useState(0);
   const [score, setScore] = useState(0);
   const [selectedOpt, setSelectedOpt] = useState(null);
   const [optCursor, setOptCursor] = useState(0);
-  const [isCompleted, setIsCompleted] = useState(false);
+  const [feedback, setFeedback] = useState(null); // { type: 'correct'|'wrong'|'timeout', correctOpt: number }
+  const [timeLeft, setTimeLeft] = useState(45);
 
   useEffect(() => {
     restartQuiz();
   }, [restartCounter]);
 
-  const handleSelectAnswer = (optIdx) => {
-    if (selectedOpt !== null || isCompleted || isPaused) return;
-    setSelectedOpt(optIdx);
-    if (optIdx === QUESTIONS[currentIdx].answer) {
-      setScore((s) => s + 100);
-    }
+  // 45-Second Countdown Timer Per Question
+  useEffect(() => {
+    if (gameState !== 'QUIZ' || selectedOpt !== null || isPaused) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          handleTimeOut();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [gameState, currentIdx, selectedOpt, isPaused]);
+
+  // Handle Timeout when 45s expires
+  const handleTimeOut = () => {
+    if (selectedOpt !== null) return;
+    const q = questions[currentIdx];
+    setSelectedOpt(-1); // -1 indicates timeout
+    setFeedback({ type: 'timeout', correctOpt: q.answer });
+
     setTimeout(() => {
-      if (currentIdx + 1 < QUESTIONS.length) {
-        setCurrentIdx((prev) => prev + 1);
-        setSelectedOpt(null);
-        setOptCursor(0);
-      } else {
-        setIsCompleted(true);
-      }
+      advanceNextQuestion();
+    }, 1800);
+  };
+
+  // Handle File Upload from PC
+  const handleFileUpload = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    setUploadedFile(file);
+    setIsProcessingFile(true);
+
+    // Mock extraction delay for basic frontend UI
+    setTimeout(() => {
+      const fileNameClean = file.name.replace(/\.[^/.]+$/, "");
+      const generatedSet = [
+        { question: `According to ${file.name}, what is the main system architecture described?`, options: ['Microservices Event-Driven', 'Monolithic Web Server', 'Client-Server Peer Exchange', 'Serverless Edge Functions'], answer: 0, explanation: 'Extracted from document chapter 1.' },
+        { question: `What default latency threshold is specified in ${fileNameClean}?`, options: ['50ms Max', 'Sub-8ms Realtime', '150ms Buffer', '500ms Threshold'], answer: 1, explanation: 'Sub-8ms realtime target specified in section 2.' },
+        { question: `Which network protocol is designated for controller packet delivery?`, options: ['UDP Packet Direct', 'WebSocket RFC 6455', 'HTTP POST Polling', 'TCP Raw Socket'], answer: 1, explanation: 'WebSocket RFC 6455 is configured.' },
+        { question: `What is the maximum allowed room concurrency in ${fileNameClean}?`, options: ['10 Sessions', '100 Concurrent Rooms', 'Unlimited Dynamic Rooms', '5 Dedicated Channels'], answer: 2, explanation: 'Unlimited dynamic rooms supported.' },
+        { question: `What fallback strategy is deployed if WebRTC candidate fails?`, options: ['Socket.IO Polling Fallback', 'Disconnect Client', 'Display Native Alert', 'HTTP Long Poll Retry'], answer: 0, explanation: 'Socket.IO polling fallback is automatically activated.' }
+      ];
+      setQuestions(generatedSet);
+      setIsProcessingFile(false);
     }, 1200);
   };
 
+  // Start Quiz
+  const handleStartQuiz = () => {
+    setGameState('QUIZ');
+    setCurrentIdx(0);
+    setScore(0);
+    setSelectedOpt(null);
+    setOptCursor(0);
+    setFeedback(null);
+    setTimeLeft(45);
+  };
+
+  // Select Option Handler
+  const handleSelectAnswer = (optIdx) => {
+    if (selectedOpt !== null || gameState !== 'QUIZ' || isPaused) return;
+
+    const q = questions[currentIdx];
+    setSelectedOpt(optIdx);
+
+    if (optIdx === q.answer) {
+      // CORRECT: Add score + time bonus, advance directly
+      const bonus = Math.floor(timeLeft * 2);
+      setScore((s) => s + 100 + bonus);
+      setFeedback({ type: 'correct', correctOpt: q.answer });
+
+      setTimeout(() => {
+        advanceNextQuestion();
+      }, 600);
+    } else {
+      // WRONG: Highlight wrong in red, correct in green, show feedback for 1.8s then advance
+      setFeedback({ type: 'wrong', correctOpt: q.answer });
+
+      setTimeout(() => {
+        advanceNextQuestion();
+      }, 1800);
+    }
+  };
+
+  // Advance to next question or complete quiz
+  const advanceNextQuestion = () => {
+    setSelectedOpt(null);
+    setFeedback(null);
+    setOptCursor(0);
+    setTimeLeft(45);
+
+    if (currentIdx + 1 < questions.length) {
+      setCurrentIdx((prev) => prev + 1);
+    } else {
+      setGameState('COMPLETED');
+    }
+  };
+
+  // Restart Quiz
+  const restartQuiz = () => {
+    setGameState('UPLOAD');
+    setUploadedFile(null);
+    setQuestions(DEFAULT_QUESTIONS);
+    setCurrentIdx(0);
+    setScore(0);
+    setSelectedOpt(null);
+    setOptCursor(0);
+    setFeedback(null);
+    setTimeLeft(45);
+  };
+
+  // Remote Controller Event Handlers
   useEffect(() => {
     if (!remoteAction || isPaused) return;
     const { action } = remoteAction;
-    if (isCompleted) {
-      if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START' || action === 'UP' || action === 'DOWN') {
+
+    if (gameState === 'UPLOAD') {
+      if (action === 'ACTION_A' || action === 'START' || action === 'UP' || action === 'DOWN') {
+        handleStartQuiz();
+      }
+      return;
+    }
+
+    if (gameState === 'COMPLETED') {
+      if (action === 'ACTION_A' || action === 'START' || action === 'UP' || action === 'DOWN') {
         restartQuiz();
       }
       return;
     }
+
+    // In QUIZ mode
     if (action === 'LEFT') setOptCursor((prev) => (prev > 0 ? prev - 1 : 3));
     else if (action === 'RIGHT') setOptCursor((prev) => (prev < 3 ? prev + 1 : 0));
     else if (action === 'UP') setOptCursor((prev) => (prev >= 2 ? prev - 2 : (prev > 0 ? prev - 1 : 3)));
@@ -219,74 +341,238 @@ function QuizGame({ remoteAction, isPaused, restartCounter, onExit }) {
     } else if (action === 'ACTION_B') {
       handleSelectAnswer(1);
     }
-  }, [remoteAction, isPaused, optCursor, isCompleted]);
+  }, [remoteAction, isPaused, optCursor, gameState]);
 
-  const restartQuiz = () => {
-    setCurrentIdx(0);
-    setScore(0);
-    setSelectedOpt(null);
-    setOptCursor(0);
-    setIsCompleted(false);
-  };
-
-  const q = QUESTIONS[currentIdx];
+  const q = questions[currentIdx] || DEFAULT_QUESTIONS[0];
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[600px] bg-[#0b0e14] text-[#ffffff] p-6">
-      <div className="w-full max-w-3xl flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold flex items-center gap-2">❓ Quiz Challenge</h2>
-        <div className="text-lg font-mono-code font-bold text-[#58a6ff]">Score: {score} pts</div>
-        <button onClick={onExit} className="px-4 py-2 rounded-lg bg-[#21262d] text-xs font-mono-code hover:bg-[#30363d] cursor-pointer">Exit Game</button>
+    <div className="flex flex-col items-center justify-center min-h-[600px] bg-[#0b0e14] text-[#ffffff] p-6 selection:bg-[#58a6ff] selection:text-[#0d1117]">
+      {/* Top Bar Header */}
+      <div className="w-full max-w-3xl flex items-center justify-between mb-6 flex-wrap gap-2">
+        <h2 className="text-2xl font-black flex items-center gap-2 text-[#ffffff]">
+          ❓ Quiz Challenge
+        </h2>
+
+        {gameState === 'QUIZ' && (
+          <div className="flex items-center gap-4 text-xs font-mono-code font-bold">
+            <span className="text-[#00ff85] bg-[#00ff85]/10 px-3 py-1.5 rounded-lg border border-[#00ff85]/30">
+              Score: {score} pts
+            </span>
+            <span className={`px-3 py-1.5 rounded-lg border font-mono-code flex items-center gap-1.5 ${
+              timeLeft <= 10 ? 'text-[#f85149] bg-[#f85149]/10 border-[#f85149]/40 animate-pulse' : 'text-[#58a6ff] bg-[#58a6ff]/10 border-[#58a6ff]/30'
+            }`}>
+              <Clock className="w-3.5 h-3.5" />
+              <span>{timeLeft}s</span>
+            </span>
+          </div>
+        )}
+
+        <button onClick={onExit} className="px-4 py-2 rounded-lg bg-[#21262d] text-xs font-mono-code hover:bg-[#30363d] transition-all cursor-pointer border border-[#30363d]">
+          Exit Game
+        </button>
       </div>
 
-      <div className="w-full max-w-3xl bg-[#161b22] border border-[#30363d] rounded-2xl p-8 shadow-2xl">
-        {!isCompleted ? (
-          <>
-            <div className="flex justify-between items-center text-xs font-mono-code text-[#8b949e] mb-4">
-              <span>QUESTION {currentIdx + 1} OF {QUESTIONS.length}</span>
-              <span>D-PAD: ◄ ► ▲ ▼ Move Highlight • OK / Action A to Submit</span>
+      <div className="w-full max-w-3xl bg-[#161b22] border border-[#30363d] rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+
+        {/* STEP 1: UPLOAD FILE SCREEN */}
+        {gameState === 'UPLOAD' && (
+          <div className="flex flex-col items-center text-center py-4 space-y-6">
+            <div className="w-16 h-16 rounded-2xl bg-[#58a6ff]/10 border border-[#58a6ff]/30 flex items-center justify-center text-[#58a6ff]">
+              <Upload className="w-8 h-8" />
             </div>
 
-            <h3 className="text-xl sm:text-2xl font-extrabold text-[#ffffff] mb-8 leading-snug">
+            <div>
+              <h3 className="text-2xl font-extrabold text-[#ffffff] mb-2">Upload Document to Generate Quiz</h3>
+              <p className="text-xs text-[#8b949e] max-w-md mx-auto">
+                Upload a document file (.pdf, .txt, .docx, .json, .csv, .md) from your PC to generate 5 custom questions (45s per question).
+              </p>
+            </div>
+
+            {/* File Dropzone / Picker */}
+            <div className="w-full max-w-md border-2 border-dashed border-[#30363d] hover:border-[#58a6ff] rounded-2xl p-6 bg-[#0d1117] transition-all flex flex-col items-center justify-center gap-3 cursor-pointer group">
+              <input
+                type="file"
+                id="quiz-file-input"
+                accept=".pdf,.txt,.docx,.json,.csv,.md"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+              <label htmlFor="quiz-file-input" className="cursor-pointer flex flex-col items-center gap-2 w-full">
+                <FileText className="w-8 h-8 text-[#8b949e] group-hover:text-[#58a6ff] transition-colors" />
+                <span className="text-xs font-mono-code font-bold text-[#58a6ff] hover:underline">
+                  {uploadedFile ? uploadedFile.name : 'Click to Browse File from PC'}
+                </span>
+                <span className="text-[10px] font-mono-code text-[#8b949e]">Supports PDF, TXT, DOCX, JSON, CSV</span>
+              </label>
+
+              {isProcessingFile && (
+                <div className="flex items-center gap-2 text-xs font-mono-code text-[#00ff85] mt-2 animate-pulse">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Parsing content & extracting 5 questions...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md">
+              <button
+                onClick={handleStartQuiz}
+                disabled={isProcessingFile}
+                className="flex-1 py-3.5 px-4 bg-[#58a6ff] text-[#0d1117] font-extrabold rounded-xl shadow-[0_0_20px_rgba(88,166,255,0.3)] hover:bg-[#58a6ff]/90 transition-all cursor-pointer text-sm"
+              >
+                {uploadedFile ? 'Start Quiz from File' : 'Start Demo 5-Question Quiz'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2: ACTIVE 5-QUESTION QUIZ SCREEN */}
+        {gameState === 'QUIZ' && (
+          <>
+            {/* Question Progress & Timer Bar */}
+            <div className="space-y-2 mb-6">
+              <div className="flex justify-between items-center text-xs font-mono-code text-[#8b949e]">
+                <span>QUESTION {currentIdx + 1} OF {questions.length}</span>
+                <span className="text-[#58a6ff] font-bold">45 SECONDS TIMER</span>
+              </div>
+
+              {/* 45s Countdown Progress Bar */}
+              <div className="w-full h-2 bg-[#0d1117] rounded-full overflow-hidden border border-[#30363d]">
+                <div
+                  className={`h-full transition-all duration-1000 ease-linear ${
+                    timeLeft > 20 ? 'bg-[#00ff85]' : timeLeft > 10 ? 'bg-[#ffd700]' : 'bg-[#f85149]'
+                  }`}
+                  style={{ width: `${(timeLeft / 45) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+
+            {/* Question Heading */}
+            <h3 className="text-lg sm:text-xl font-extrabold text-[#ffffff] mb-6 leading-relaxed">
               {q.question}
             </h3>
 
+            {/* Options 2x2 Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {q.options.map((opt, idx) => {
                 const isFocused = idx === optCursor;
-                let btnStyle = isFocused ? "bg-[#58a6ff]/20 border-[#58a6ff] text-[#ffffff] shadow-[0_0_15px_rgba(88,166,255,0.4)] scale-[1.02]" : "bg-[#0d1117] border-[#30363d] text-[#c9d1d9] hover:border-[#58a6ff]";
+                const isSelected = selectedOpt === idx;
+                const isCorrect = idx === q.answer;
+
+                let btnStyle = isFocused
+                  ? "bg-[#58a6ff]/20 border-[#58a6ff] text-[#ffffff] shadow-[0_0_15px_rgba(88,166,255,0.4)] scale-[1.02]"
+                  : "bg-[#0d1117] border-[#30363d] text-[#c9d1d9] hover:border-[#58a6ff]";
+
                 if (selectedOpt !== null) {
-                  if (idx === q.answer) {
-                    btnStyle = "bg-[#00ff85]/20 border-[#00ff85] text-[#00ff85] font-bold shadow-[0_0_15px_rgba(0,255,133,0.3)]";
-                  } else if (idx === selectedOpt) {
-                    btnStyle = "bg-[#f85149]/20 border-[#f85149] text-[#f85149] font-bold";
+                  if (isCorrect) {
+                    // Correct answer highlighted in Green
+                    btnStyle = "bg-[#00ff85]/20 border-[#00ff85] text-[#00ff85] font-bold shadow-[0_0_20px_rgba(0,255,133,0.4)] scale-[1.02]";
+                  } else if (isSelected) {
+                    // Wrong user selection highlighted in Red
+                    btnStyle = "bg-[#f85149]/20 border-[#f85149] text-[#f85149] font-bold shadow-[0_0_15px_rgba(248,81,73,0.3)]";
+                  } else {
+                    btnStyle = "bg-[#0d1117]/50 border-[#30363d]/50 text-[#8b949e] opacity-50";
                   }
                 }
+
                 const labelMap = ['Option A', 'Option B', 'Option C', 'Option D'];
 
                 return (
                   <button
                     key={idx}
+                    disabled={selectedOpt !== null}
                     onClick={() => {
                       setOptCursor(idx);
                       handleSelectAnswer(idx);
                     }}
-                    className={`p-4 rounded-xl border text-left font-mono-code text-sm transition-all cursor-pointer flex flex-col gap-1 ${btnStyle}`}
+                    className={`p-4 rounded-xl border text-left font-mono-code text-sm transition-all cursor-pointer flex flex-col gap-1.5 relative overflow-hidden ${btnStyle}`}
                   >
-                    <span className={`text-[10px] font-bold ${isFocused ? 'text-[#58a6ff]' : 'text-[#8b949e]'}`}>{labelMap[idx]} {isFocused ? '(Highlighted)' : ''}</span>
-                    <span>{opt}</span>
+                    <div className="flex justify-between items-center w-full">
+                      <span className={`text-[10px] font-bold ${isFocused ? 'text-[#58a6ff]' : 'text-[#8b949e]'}`}>
+                        {labelMap[idx]} {isFocused && selectedOpt === null ? '(Highlighted)' : ''}
+                      </span>
+
+                      {selectedOpt !== null && isCorrect && (
+                        <span className="text-xs font-bold text-[#00ff85] flex items-center gap-1">
+                          <CheckCircle2 className="w-4 h-4" /> Correct
+                        </span>
+                      )}
+
+                      {selectedOpt !== null && isSelected && !isCorrect && (
+                        <span className="text-xs font-bold text-[#f85149] flex items-center gap-1">
+                          <X className="w-4 h-4" /> Wrong
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-semibold">{opt}</span>
                   </button>
                 );
               })}
             </div>
+
+            {/* Feedback & Correct Answer Explanation Banner */}
+            {feedback && (
+              <div className={`mt-6 p-4 rounded-xl border font-mono-code text-xs flex items-center justify-between gap-3 animate-in fade-in duration-200 ${
+                feedback.type === 'correct'
+                  ? 'bg-[#00ff85]/10 border-[#00ff85]/40 text-[#00ff85]'
+                  : 'bg-[#f85149]/10 border-[#f85149]/40 text-[#f85149]'
+              }`}>
+                <div className="flex items-center gap-2">
+                  {feedback.type === 'correct' ? (
+                    <CheckCircle2 className="w-5 h-5 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                  )}
+                  <div>
+                    <div className="font-bold">
+                      {feedback.type === 'correct' ? 'Correct Answer! Advancing...' : feedback.type === 'timeout' ? 'Time Expired (45s)!' : 'Incorrect Answer!'}
+                    </div>
+                    {feedback.type !== 'correct' && (
+                      <div className="text-[11px] text-[#ffffff] mt-0.5">
+                        Correct Answer: <strong className="text-[#00ff85]">{q.options[q.answer]}</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </>
-        ) : (
-          <div className="text-center py-8 flex flex-col items-center gap-4">
-            <h3 className="text-3xl font-extrabold text-[#00ff85]">Quiz Completed!</h3>
-            <p className="text-lg font-mono-code text-[#c9d1d9]">Your Final Score: <span className="text-[#58a6ff] font-bold">{score} / {QUESTIONS.length * 100}</span></p>
-            <button onClick={restartQuiz} className="px-6 py-3 bg-[#58a6ff] text-[#0d1117] font-bold rounded-xl shadow-lg hover:scale-105 transition-transform mt-4 cursor-pointer">
-              Play Again
-            </button>
+        )}
+
+        {/* STEP 3: COMPLETED RESULTS SCREEN */}
+        {gameState === 'COMPLETED' && (
+          <div className="text-center py-6 flex flex-col items-center gap-6">
+            <div className="w-16 h-16 rounded-full bg-[#00ff85]/10 border border-[#00ff85]/30 flex items-center justify-center text-[#00ff85]">
+              <CheckCircle2 className="w-10 h-10" />
+            </div>
+
+            <div>
+              <h3 className="text-3xl font-black text-[#00ff85]">Quiz Completed!</h3>
+              <p className="text-xs text-[#8b949e] font-mono-code mt-1">
+                {uploadedFile ? `Based on: ${uploadedFile.name}` : 'Sample Quiz Document'}
+              </p>
+            </div>
+
+            <div className="bg-[#0d1117] border border-[#30363d] rounded-2xl p-6 w-full max-w-md font-mono-code flex justify-around">
+              <div>
+                <div className="text-[10px] text-[#8b949e] uppercase">Final Score</div>
+                <div className="text-2xl font-bold text-[#58a6ff]">{score} pts</div>
+              </div>
+              <div className="border-r border-[#30363d]"></div>
+              <div>
+                <div className="text-[10px] text-[#8b949e] uppercase">Questions</div>
+                <div className="text-2xl font-bold text-[#00ff85]">{questions.length} / 5</div>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                onClick={restartQuiz}
+                className="px-6 py-3 bg-[#58a6ff] text-[#0d1117] font-extrabold rounded-xl shadow-lg hover:scale-105 transition-all cursor-pointer text-sm"
+              >
+                Upload New Document
+              </button>
+            </div>
           </div>
         )}
       </div>
