@@ -783,10 +783,10 @@ export default function App() {
         if (code) setRoomCode(code);
         setCurrentView('controller');
         const savedName = localStorage.getItem('air_player_name');
-        if (savedName && code) {
+        if (code) {
           socket.emit('join_room', {
             roomCode: code,
-            playerName: savedName,
+            playerName: savedName || 'Mobile Gamer',
             deviceName: 'Mobile Controller (' + (navigator.platform || 'Handheld') + ')'
           });
         }
@@ -1411,12 +1411,22 @@ export default function App() {
         </div>
 
         {/* Main Content Area */}
-        <div className="max-w-2xl mx-auto w-full flex flex-col items-center">
+        <div className="max-w-2xl mx-auto w-full flex flex-col items-center relative">
           
-          {/* Top Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#161b22] border border-[#30363d] text-xs font-mono-code text-[#58a6ff] mb-4">
-            <Radio className="w-3.5 h-3.5" />
-            <span>1 USER VS BOT AI MODE ACTIVE</span>
+          {/* Top Header Controls with Back to Home Button */}
+          <div className="w-full flex items-center justify-between mb-4">
+            <button
+              onClick={() => setCurrentView('landing')}
+              className="px-3.5 py-1.5 rounded-xl bg-[#161b22] border border-[#30363d] hover:border-[#58a6ff] hover:bg-[#21262d] text-[#ffffff] hover:text-[#58a6ff] text-xs font-mono-code font-bold flex items-center gap-2 transition-all cursor-pointer shadow-md group"
+            >
+              <ArrowLeft className="w-4 h-4 text-[#58a6ff] group-hover:-translate-x-1 transition-transform" />
+              <span>Back to Home Page</span>
+            </button>
+
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#161b22] border border-[#30363d] text-xs font-mono-code text-[#58a6ff]">
+              <Radio className="w-3.5 h-3.5" />
+              <span>1 USER VS BOT AI MODE</span>
+            </div>
           </div>
 
           <h1 className="text-3xl sm:text-4xl font-extrabold text-[#ffffff] text-center mb-2 flex items-center justify-center gap-3">
@@ -1613,9 +1623,8 @@ export default function App() {
             </div>
 
             <button
-              disabled={!matchReady}
               onClick={() => setCurrentView('arena')}
-              className={`w-full sm:w-auto px-6 py-2.5 rounded-lg text-xs font-mono-code font-bold flex items-center justify-center gap-2 transition-all ${matchReady ? 'bg-[#58a6ff] text-[#0d1117] hover:bg-[#58a6ff]/90 shadow-[0_0_15px_rgba(88,166,255,0.4)] cursor-pointer' : 'bg-[#30363d]/50 text-[#8b949e] cursor-not-allowed'}`}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-lg text-xs font-mono-code font-bold flex items-center justify-center gap-2 transition-all bg-[#58a6ff] text-[#0d1117] hover:bg-[#58a6ff]/90 shadow-[0_0_15px_rgba(88,166,255,0.4)] cursor-pointer"
             >
               <span>Proceed to Game Selection</span>
               <ArrowRight className="w-4 h-4" />
