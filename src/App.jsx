@@ -515,128 +515,359 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
 
 // --- GAME 5: FLAPPY BIRD RACE ---
 function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
-  const [birdY, setBirdY] = useState(50);
-  const [velocity, setVelocity] = useState(0);
-  const [pipes, setPipes] = useState([
-    { x: 100, gapTop: 30, gapBottom: 65 }
-  ]);
+  const canvasRef = useRef(null);
   const [score, setScore] = useState(0);
+  const [highScore, setHighScore] = useState(() => {
+    return parseInt(localStorage.getItem('air_flappy_highscore') || '0', 10);
+  });
   const [gameOver, setGameOver] = useState(false);
 
-  useEffect(() => {
-    resetGame();
-  }, [restartCounter]);
-
-  const flap = () => {
-    if (gameOver || isPaused) return;
-    setVelocity(-6);
-  };
-
-  useEffect(() => {
-    if (!remoteAction || isPaused) return;
-    const { action } = remoteAction;
-    if (gameOver) {
-      if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START' || action === 'UP' || action === 'DOWN') {
-        resetGame();
-      }
-      return;
-    }
-    if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'UP' || action === 'START' || action === 'LEFT' || action === 'RIGHT' || action === 'DOWN') {
-      flap();
-    }
-  }, [remoteAction, isPaused, gameOver]);
-
-  useEffect(() => {
-    if (gameOver || isPaused) return;
-    const interval = setInterval(() => {
-      setBirdY((prevY) => {
-        const nextY = prevY + velocity * 0.4;
-        if (nextY <= 0 || nextY >= 92) {
-          setGameOver(true);
-        }
-        return Math.max(0, Math.min(92, nextY));
-      });
-      setVelocity((v) => v + 0.5);
-
-      setPipes((prevPipes) => {
-        return prevPipes.map((p) => {
-          let newX = p.x - 2;
-          if (newX < -15) {
-            setScore((s) => s + 1);
-            const randomGapTop = Math.floor(Math.random() * 35) + 15;
-            return { x: 100, gapTop: randomGapTop, gapBottom: randomGapTop + 35 };
-          }
-          return { ...p, x: newX };
-        });
-      });
-    }, 40);
-
-    return () => clearInterval(interval);
-  }, [velocity, gameOver, isPaused]);
-
-  useEffect(() => {
-    if (gameOver || isPaused) return;
-    const currentPipe = pipes[0];
-    if (currentPipe && currentPipe.x >= 15 && currentPipe.x <= 35) {
-      if (birdY < currentPipe.gapTop || birdY > currentPipe.gapBottom) {
-        setGameOver(true);
-      }
-    }
-  }, [birdY, pipes, gameOver, isPaused]);
+  const gameStateRef = useRef({
+    birdY: 200,
+    velocity: 0,
+    rotation: 0,
+    pipes: [],
+    particles: [],
+    popups: [],
+    score: 0,
+    highScore: parseInt(localStorage.getItem('air_flappy_highscore') || '0', 10),
+    isGameOver: false,
+    frameCount: 0,
+    wingAngle: 0
+  });
 
   const resetGame = () => {
-    setBirdY(50);
-    setVelocity(0);
-    setPipes([{ x: 100, gapTop: 30, gapBottom: 65 }]);
+    const g = gameStateRef.current;
+    g.birdY = 200;
+    g.velocity = 0;
+    g.rotation = 0;
+    g.pipes = [
+      { x: 500, topHeight: 140, bottomY: 280, passed: false },
+      { x: 760, topHeight: 110, bottomY: 250, passed: false }
+    ];
+    g.particles = [];
+    g.popups = [];
+    g.score = 0;
+    g.isGameOver = false;
     setScore(0);
     setGameOver(false);
   };
 
+  const flap = () => {
+    const g = gameStateRef.current;
+    if (g.isGameOver) {
+      resetGame();
+      return;
+    }
+    if (isPaused) return;
+    g.velocity = -7.2;
+    g.wingAngle = -0.8;
+
+    // Spawn flap particle trail
+    for (let i = 0; i < 6; i++) {
+      g.particles.push({
+        x: 140,
+        y: g.birdY + (Math.random() * 10 - 5),
+        vx: -2 - Math.random() * 3,
+        vy: (Math.random() - 0.5) * 2,
+        life: 1.0,
+        color: i % 2 === 0 ? '#58a6ff' : '#ffd700',
+        size: 3 + Math.random() * 3
+      });
+    }
+  };
+
+  // Remote controller & restart counter listeners
+  useEffect(() => {
+    resetGame();
+  }, [restartCounter]);
+
+  useEffect(() => {
+    if (!remoteAction || isPaused) return;
+    flap();
+  }, [remoteAction, isPaused]);
+
+  // Main Canvas Game Loop (60 FPS rAF)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let animId;
+
+    const loop = () => {
+      const g = gameStateRef.current;
+      g.frameCount++;
+
+      ctx.clearRect(0, 0, 800, 450);
+
+      // Sky Background Gradient
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, 450);
+      skyGrad.addColorStop(0, '#0a0e17');
+      skyGrad.addColorStop(0.6, '#131b29');
+      skyGrad.addColorStop(1, '#1a2436');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, 800, 450);
+
+      // Parallax Background Stars
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      for (let i = 0; i < 20; i++) {
+        const starX = ((i * 47) - g.frameCount * 0.2) % 800;
+        const x = starX < 0 ? starX + 800 : starX;
+        const y = (i * 23) % 380;
+        const size = (i % 3) + 1;
+        ctx.fillRect(x, y, size, size);
+      }
+
+      // Scrolling City Silhouette
+      ctx.fillStyle = 'rgba(22, 27, 34, 0.6)';
+      for (let i = 0; i < 10; i++) {
+        const hX = ((i * 90) - g.frameCount * 0.4) % 900;
+        const x = hX < -90 ? hX + 900 : hX;
+        ctx.fillRect(x, 350, 75, 70);
+      }
+
+      if (!g.isGameOver && !isPaused) {
+        // Physics update
+        g.velocity += 0.38;
+        g.birdY += g.velocity;
+
+        // Smooth pitch rotation
+        if (g.velocity < 0) {
+          g.rotation = Math.max(-0.45, g.rotation - 0.1);
+        } else {
+          g.rotation = Math.min(0.9, g.rotation + 0.04);
+        }
+
+        g.wingAngle += (0 - g.wingAngle) * 0.15;
+
+        // Ground & Ceiling bounds
+        if (g.birdY <= 15) {
+          g.birdY = 15;
+          g.velocity = 0;
+        }
+        if (g.birdY >= 405) {
+          g.birdY = 405;
+          g.isGameOver = true;
+          setGameOver(true);
+        }
+
+        // Update Pipes
+        const pipeSpeed = 2.4;
+        g.pipes.forEach((p) => {
+          p.x -= pipeSpeed;
+
+          // Check Score
+          if (!p.passed && p.x < 140) {
+            p.passed = true;
+            g.score += 1;
+            setScore(g.score);
+
+            if (g.score > g.highScore) {
+              g.highScore = g.score;
+              setHighScore(g.score);
+              localStorage.setItem('air_flappy_highscore', String(g.score));
+            }
+
+            g.popups.push({ x: 160, y: g.birdY - 20, alpha: 1.0, text: '+1' });
+          }
+
+          // Pipe Collision Check (Fair Hitbox)
+          const birdRadius = 14;
+          const birdX = 140;
+          if (p.x < birdX + birdRadius && p.x + 55 > birdX - birdRadius) {
+            if (g.birdY - birdRadius < p.topHeight || g.birdY + birdRadius > p.bottomY) {
+              g.isGameOver = true;
+              setGameOver(true);
+            }
+          }
+        });
+
+        // Spawn new pipe
+        const lastPipe = g.pipes[g.pipes.length - 1];
+        if (!lastPipe || lastPipe.x <= 540) {
+          const gapHeight = 140;
+          const topH = Math.floor(Math.random() * 160) + 50;
+          g.pipes.push({
+            x: 820,
+            topHeight: topH,
+            bottomY: topH + gapHeight,
+            passed: false
+          });
+        }
+
+        g.pipes = g.pipes.filter((p) => p.x > -80);
+      }
+
+      // Draw Pipes
+      g.pipes.forEach((p) => {
+        const pipeGrad = ctx.createLinearGradient(p.x, 0, p.x + 55, 0);
+        pipeGrad.addColorStop(0, '#00ff85');
+        pipeGrad.addColorStop(0.5, '#00cc66');
+        pipeGrad.addColorStop(1, '#008844');
+
+        ctx.fillStyle = pipeGrad;
+        ctx.fillRect(p.x, 0, 55, p.topHeight);
+        ctx.fillRect(p.x, p.bottomY, 55, 420 - p.bottomY);
+
+        // Pipe Caps
+        ctx.fillStyle = '#00ff85';
+        ctx.fillRect(p.x - 4, p.topHeight - 20, 63, 20);
+        ctx.fillRect(p.x - 4, p.bottomY, 63, 20);
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.5;
+        ctx.strokeRect(p.x - 4, p.topHeight - 20, 63, 20);
+        ctx.strokeRect(p.x - 4, p.bottomY, 63, 20);
+        ctx.globalAlpha = 1.0;
+      });
+
+      // Draw Ground
+      const groundGrad = ctx.createLinearGradient(0, 420, 0, 450);
+      groundGrad.addColorStop(0, '#21262d');
+      groundGrad.addColorStop(1, '#0d1117');
+      ctx.fillStyle = groundGrad;
+      ctx.fillRect(0, 420, 800, 30);
+
+      ctx.strokeStyle = '#00ff85';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 420);
+      ctx.lineTo(800, 420);
+      ctx.stroke();
+
+      // Update & Draw Particles
+      g.particles.forEach((pt) => {
+        pt.x += pt.vx;
+        pt.y += pt.vy;
+        pt.life -= 0.04;
+        if (pt.life > 0) {
+          ctx.fillStyle = pt.color;
+          ctx.globalAlpha = pt.life;
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, pt.size * pt.life, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+      g.particles = g.particles.filter((pt) => pt.life > 0);
+      ctx.globalAlpha = 1.0;
+
+      // Draw Score Popups
+      g.popups.forEach((pop) => {
+        pop.y -= 1;
+        pop.alpha -= 0.025;
+        if (pop.alpha > 0) {
+          ctx.fillStyle = '#00ff85';
+          ctx.globalAlpha = pop.alpha;
+          ctx.font = 'bold 20px "JetBrains Mono", monospace';
+          ctx.fillText(pop.text, pop.x, pop.y);
+        }
+      });
+      g.popups = g.popups.filter((pop) => pop.alpha > 0);
+      ctx.globalAlpha = 1.0;
+
+      // Draw Stylized Glowing Bird
+      ctx.save();
+      ctx.translate(140, g.birdY);
+      ctx.rotate(g.rotation);
+
+      ctx.shadowColor = '#58a6ff';
+      ctx.shadowBlur = 15;
+
+      const bodyGrad = ctx.createRadialGradient(-2, -2, 2, 0, 0, 18);
+      bodyGrad.addColorStop(0, '#ffffff');
+      bodyGrad.addColorStop(0.4, '#ffd700');
+      bodyGrad.addColorStop(1, '#ff9900');
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, 18, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ff8800';
+      ctx.beginPath();
+      ctx.ellipse(-6, 2, 10, 6, g.wingAngle, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(7, -6, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#0b0e14';
+      ctx.beginPath();
+      ctx.arc(9, -6, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ff4400';
+      ctx.beginPath();
+      ctx.moveTo(14, -2);
+      ctx.lineTo(24, 2);
+      ctx.lineTo(14, 6);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+
+      animId = requestAnimationFrame(loop);
+    };
+
+    animId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animId);
+  }, [isPaused]);
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-[600px] bg-[#0b0e14] text-[#ffffff] p-6">
+    <div className="flex flex-col items-center justify-center min-h-[600px] bg-[#0b0e14] text-[#ffffff] p-6 selection:bg-[#58a6ff] selection:text-[#0d1117]">
       <div className="w-full max-w-4xl flex items-center justify-between mb-4">
-        <h2 className="text-2xl font-bold flex items-center gap-2">🐤 Flappy Bird Race</h2>
-        <div className="text-lg font-mono-code font-bold text-[#00ff85]">Pipes Passed: {score}</div>
-        <button onClick={onExit} className="px-4 py-2 rounded-lg bg-[#21262d] text-xs font-mono-code hover:bg-[#30363d] cursor-pointer">Exit Game</button>
+        <h2 className="text-2xl font-black flex items-center gap-2 text-[#ffffff]">
+          🐤 Flappy Bird Race
+        </h2>
+        <div className="flex items-center gap-4 text-xs font-mono-code font-bold">
+          <span className="text-[#00ff85] bg-[#00ff85]/10 px-3 py-1.5 rounded-lg border border-[#00ff85]/30">
+            Score: {score}
+          </span>
+          <span className="text-[#ffd700] bg-[#ffd700]/10 px-3 py-1.5 rounded-lg border border-[#ffd700]/30">
+            Best: {highScore}
+          </span>
+        </div>
+        <button
+          onClick={onExit}
+          className="px-4 py-2 rounded-lg bg-[#21262d] text-xs font-mono-code hover:bg-[#30363d] transition-all cursor-pointer border border-[#30363d]"
+        >
+          Exit Game
+        </button>
       </div>
 
       <div
         onClick={flap}
-        className="relative w-full max-w-4xl h-[400px] bg-[#0d1117] border-2 border-[#30363d] rounded-2xl overflow-hidden shadow-2xl cursor-pointer"
+        className="relative w-full max-w-4xl h-[420px] bg-[#0d1117] border-2 border-[#30363d] rounded-2xl overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.8)] cursor-pointer group"
       >
-        <div
-          className="absolute left-[20%] w-8 h-8 bg-[#58a6ff] rounded-full border-2 border-[#ffffff] flex items-center justify-center shadow-[0_0_15px_rgba(88,166,255,0.9)] transition-all duration-75 text-sm"
-          style={{ top: `calc(${birdY}% - 16px)` }}
-        >
-          🐤
-        </div>
-
-        {pipes.map((p, idx) => (
-          <React.Fragment key={idx}>
-            <div
-              className="absolute bg-[#00ff85]/20 border-2 border-[#00ff85] rounded-b-xl"
-              style={{ left: `${p.x}%`, width: '48px', top: '0', height: `${p.gapTop}%` }}
-            />
-            <div
-              className="absolute bg-[#00ff85]/20 border-2 border-[#00ff85] rounded-t-xl"
-              style={{ left: `${p.x}%`, width: '48px', top: `${p.gapBottom}%`, bottom: '0' }}
-            />
-          </React.Fragment>
-        ))}
+        <canvas ref={canvasRef} width={800} height={450} className="w-full h-full object-cover" />
 
         {gameOver && (
-          <div className="absolute inset-0 bg-[#0d1117]/90 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
-            <h3 className="text-3xl font-extrabold text-[#f85149]">Bird Crashed!</h3>
-            <p className="text-sm font-mono-code text-[#8b949e]">Score: {score} Pipes Passed</p>
-            <button onClick={(e) => { e.stopPropagation(); resetGame(); }} className="px-6 py-3 bg-[#58a6ff] text-[#0d1117] font-bold rounded-xl shadow-lg hover:scale-105 transition-transform cursor-pointer">
-              Try Again
+          <div className="absolute inset-0 bg-[#0d1117]/90 backdrop-blur-md flex flex-col items-center justify-center gap-4">
+            <h3 className="text-4xl font-black text-[#f85149] drop-shadow-[0_0_15px_rgba(248,81,73,0.5)]">
+              Bird Crashed!
+            </h3>
+            <div className="flex items-center gap-6 font-mono-code text-sm text-[#8b949e]">
+              <div>Pipes Passed: <span className="text-[#00ff85] font-bold text-lg">{score}</span></div>
+              <div>High Score: <span className="text-[#ffd700] font-bold text-lg">{highScore}</span></div>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                resetGame();
+              }}
+              className="mt-2 px-8 py-3.5 bg-[#58a6ff] text-[#0d1117] font-extrabold rounded-xl shadow-[0_0_25px_rgba(88,166,255,0.4)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            >
+              Play Again
             </button>
           </div>
         )}
       </div>
 
-      <div className="mt-4 text-xs font-mono-code text-[#8b949e]">
-        Mobile Remote: Press <span className="text-[#58a6ff]">Action A</span> or <span className="text-[#58a6ff]">▲ UP</span> to flap bird upwards.
+      <div className="mt-4 text-xs font-mono-code text-[#8b949e] text-center">
+        Mobile Remote: Tap <span className="text-[#58a6ff] font-bold">ANY BUTTON</span> (Action A, D-Pad ▲ UP, Start) or click screen to flap bird.
       </div>
     </div>
   );
