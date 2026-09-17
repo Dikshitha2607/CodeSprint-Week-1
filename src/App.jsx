@@ -335,6 +335,9 @@ function TicTacToeGame({ remoteAction, isPaused, restartCounter, onExit }) {
   const [board, setBoard] = useState(Array(9).fill(null));
   const [cursor, setCursor] = useState(0);
   const [winner, setWinner] = useState(null);
+  const [aiThinking, setAiThinking] = useState(false);
+  const [aiDifficulty, setAiDifficulty] = useState(0.35);
+  const [playerWinStreak, setPlayerWinStreak] = useState(0);
 
   useEffect(() => {
     resetGame();
@@ -354,13 +357,91 @@ function TicTacToeGame({ remoteAction, isPaused, restartCounter, onExit }) {
     return null;
   };
 
+  const findWinningMove = (currentBoard, player) => {
+    for (let i = 0; i < currentBoard.length; i++) {
+      if (currentBoard[i] !== null) continue;
+      const testBoard = [...currentBoard];
+      testBoard[i] = player;
+      if (checkWinner(testBoard) === player) return i;
+    }
+    return null;
+  };
+
+  const chooseAiMove = (currentBoard, difficulty) => {
+    const availableMoves = currentBoard.map((cell, idx) => (cell === null ? idx : null)).filter((idx) => idx !== null);
+    if (!availableMoves.length) return null;
+
+    const immediateWin = findWinningMove(currentBoard, 'O');
+    if (immediateWin !== null) return immediateWin;
+
+    const blockMove = findWinningMove(currentBoard, 'X');
+    if (blockMove !== null) return blockMove;
+
+    const strategicOrder = [4, 0, 2, 6, 8, 1, 3, 5, 7];
+    const preferredMove = strategicOrder.find((idx) => currentBoard[idx] === null);
+    if (preferredMove !== undefined && Math.random() < difficulty) {
+      return preferredMove;
+    }
+
+    if (Math.random() < 0.35) {
+      return availableMoves[Math.floor(Math.random() * availableMoves.length)];
+    }
+
+    return preferredMove !== undefined ? preferredMove : availableMoves[Math.floor(Math.random() * availableMoves.length)];
+  };
+
+  useEffect(() => {
+    if (!aiThinking || winner || isPaused) return;
+
+    const timer = setTimeout(() => {
+      const move = chooseAiMove(board, aiDifficulty);
+      if (move === null || winner) {
+        setAiThinking(false);
+        return;
+      }
+
+      const nextBoard = [...board];
+      nextBoard[move] = 'O';
+      setBoard(nextBoard);
+
+      const nextWinner = checkWinner(nextBoard);
+      if (nextWinner) {
+        setWinner(nextWinner);
+        if (nextWinner === 'O') {
+          setPlayerWinStreak(0);
+          setAiDifficulty((prev) => Math.max(0.35, prev - 0.12));
+        }
+      }
+      setAiThinking(false);
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [aiThinking, board, winner, isPaused, aiDifficulty]);
+
   const handleTileClick = (idx) => {
-    if (board[idx] || winner || isPaused) return;
+    if (board[idx] || winner || isPaused || aiThinking) return;
     const nextBoard = [...board];
     nextBoard[idx] = 'X';
     setBoard(nextBoard);
+
     const win = checkWinner(nextBoard);
-    if (win) setWinner(win);
+    if (win) {
+      setWinner(win);
+      if (win === 'X') {
+        setPlayerWinStreak((prev) => prev + 1);
+        setAiDifficulty((prev) => Math.min(0.9, prev + 0.12 + playerWinStreak * 0.02));
+      }
+      return;
+    }
+
+    if (nextBoard.every((cell) => cell !== null)) {
+      setWinner('Draw');
+      setPlayerWinStreak(0);
+      setAiDifficulty((prev) => Math.max(0.35, prev - 0.06));
+      return;
+    }
+
+    setAiThinking(true);
   };
 
   useEffect(() => {
@@ -379,12 +460,15 @@ function TicTacToeGame({ remoteAction, isPaused, restartCounter, onExit }) {
     else if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START') {
       handleTileClick(cursor);
     }
-  }, [remoteAction, cursor, board, winner, isPaused]);
+  }, [remoteAction, cursor, board, winner, isPaused, aiThinking, playerWinStreak]);
 
   const resetGame = () => {
     setBoard(Array(9).fill(null));
     setWinner(null);
     setCursor(0);
+    setAiThinking(false);
+    setAiDifficulty(0.35);
+    setPlayerWinStreak(0);
   };
 
   return (
