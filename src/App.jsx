@@ -32,9 +32,13 @@ import {
   Loader2
 } from 'lucide-react';
 
-// Connect to Socket.IO backend server dynamically on port 3000
+// Connect to Socket.IO backend server (Render deployment URL vs Localhost fallback)
 const socketHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost';
-const socket = io(`http://${socketHost}:3000`, {
+export const BACKEND_URL = typeof window !== 'undefined' && window.location.hostname.endsWith('onrender.com')
+  ? 'https://air-gamepad-backend.onrender.com'
+  : `http://${socketHost}:3000`;
+
+const socket = io(BACKEND_URL, {
   autoConnect: true,
   transports: ['websocket', 'polling']
 });
@@ -655,7 +659,7 @@ export default function App() {
 
   // Fetch Local Network IPv4 Address from Server API
   useEffect(() => {
-    fetch(`http://${socketHost}:3000/api/config`)
+    fetch(`${BACKEND_URL}/api/config`)
       .then((res) => res.json())
       .then((data) => {
         if (data && data.localIp) {
@@ -949,8 +953,11 @@ export default function App() {
     }, 1200);
   };
 
-  // Helper to build Controller Join URL using Host LAN IPv4
+  // Helper to build Controller Join URL (Render deployment vs Local LAN IPv4)
   const getControllerUrl = () => {
+    if (typeof window !== 'undefined' && window.location.hostname.endsWith('onrender.com')) {
+      return `https://${window.location.hostname}/join?code=${roomState.code || roomCode}`;
+    }
     const hostIp = serverIp || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? window.location.hostname : '127.0.0.1');
     const port = typeof window !== 'undefined' && window.location.port ? `:${window.location.port}` : ':5173';
     return `http://${hostIp}${port}/join?code=${roomState.code || roomCode}`;

@@ -8,6 +8,10 @@ const app = express();
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', service: 'Air GamePad Backend', socketIo: 'active' });
+});
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
