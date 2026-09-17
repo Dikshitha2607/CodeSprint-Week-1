@@ -52,9 +52,13 @@ const socket = io(BACKEND_URL, {
 // --- GAME 1: PING PONG ---
 function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
   const [paddleY, setPaddleY] = useState(50);
+  const [aiPaddleY, setAiPaddleY] = useState(50);
   const [ball, setBall] = useState({ x: 50, y: 50, vx: 1.2, vy: 0.8 });
   const [score, setScore] = useState(0);
+  const [aiDifficulty, setAiDifficulty] = useState(0.7);
   const [gameOver, setGameOver] = useState(false);
+
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
   useEffect(() => {
     resetGame();
@@ -100,11 +104,6 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
           newY = Math.max(5, Math.min(95, newY));
         }
 
-        if (newX >= 95) {
-          newVx = -Math.abs(prev.vx);
-          newX = 95;
-        }
-
         if (newX <= 8) {
           if (Math.abs(newY - paddleY) <= 18) {
             newVx = Math.abs(prev.vx) * 1.05;
@@ -115,17 +114,51 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
           }
         }
 
+        if (newX >= 92) {
+          if (Math.abs(newY - aiPaddleY) <= 18) {
+            newVx = -Math.abs(prev.vx) * 1.05;
+            newX = 92;
+            newVy += (newY - aiPaddleY) * 0.12;
+          } else {
+            setGameOver(true);
+          }
+        }
+
         return { x: newX, y: newY, vx: newVx, vy: newVy };
       });
     }, 30);
 
     return () => clearInterval(interval);
-  }, [paddleY, gameOver, isPaused]);
+  }, [paddleY, aiPaddleY, gameOver, isPaused]);
+
+  useEffect(() => {
+    if (gameOver || isPaused) return;
+
+    const aiSpeed = 0.8 + aiDifficulty * 1.35;
+    const trackingBias = Math.max(0, 16 - aiDifficulty * 8);
+    const predictedY = ball.y + ball.vy * (2.5 + aiDifficulty * 2.5);
+    const targetY = clamp(predictedY + (ball.vy >= 0 ? trackingBias * 0.2 : -trackingBias * 0.2), 10, 90);
+
+    setAiPaddleY((prev) => {
+      const diff = targetY - prev;
+      if (Math.abs(diff) < 3) {
+        return prev;
+      }
+      const step = Math.min(Math.abs(diff), aiSpeed);
+      return clamp(prev + (diff >= 0 ? step : -step), 10, 90);
+    });
+  }, [ball, aiDifficulty, gameOver, isPaused]);
+
+  useEffect(() => {
+    setAiDifficulty(Math.min(2.1, 0.7 + score * 0.08));
+  }, [score]);
 
   const resetGame = () => {
     setBall({ x: 50, y: 50, vx: 1.2, vy: 0.8 });
     setScore(0);
     setPaddleY(50);
+    setAiPaddleY(50);
+    setAiDifficulty(0.7);
     setGameOver(false);
   };
 
@@ -143,6 +176,11 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
         <div
           className="absolute left-[3%] w-4 h-24 bg-[#58a6ff] rounded-full shadow-[0_0_15px_rgba(88,166,255,0.8)] transition-all duration-75"
           style={{ top: `calc(${paddleY}% - 48px)` }}
+        ></div>
+
+        <div
+          className="absolute right-[3%] w-4 h-24 bg-[#f85149] rounded-full shadow-[0_0_15px_rgba(248,81,73,0.8)] transition-all duration-75"
+          style={{ top: `calc(${aiPaddleY}% - 48px)` }}
         ></div>
 
         <div
@@ -585,6 +623,9 @@ function TicTacToeGame({ remoteAction, isPaused, restartCounter, onExit }) {
   const [board, setBoard] = useState(Array(9).fill(null));
   const [cursor, setCursor] = useState(0);
   const [winner, setWinner] = useState(null);
+  const [aiThinking, setAiThinking] = useState(false);
+  const [aiDifficulty, setAiDifficulty] = useState(0.35);
+  const [playerWinStreak, setPlayerWinStreak] = useState(0);
 
   useEffect(() => {
     resetGame();
@@ -604,13 +645,91 @@ function TicTacToeGame({ remoteAction, isPaused, restartCounter, onExit }) {
     return null;
   };
 
+  const findWinningMove = (currentBoard, player) => {
+    for (let i = 0; i < currentBoard.length; i++) {
+      if (currentBoard[i] !== null) continue;
+      const testBoard = [...currentBoard];
+      testBoard[i] = player;
+      if (checkWinner(testBoard) === player) return i;
+    }
+    return null;
+  };
+
+  const chooseAiMove = (currentBoard, difficulty) => {
+    const availableMoves = currentBoard.map((cell, idx) => (cell === null ? idx : null)).filter((idx) => idx !== null);
+    if (!availableMoves.length) return null;
+
+    const immediateWin = findWinningMove(currentBoard, 'O');
+    if (immediateWin !== null) return immediateWin;
+
+    const blockMove = findWinningMove(currentBoard, 'X');
+    if (blockMove !== null) return blockMove;
+
+    const strategicOrder = [4, 0, 2, 6, 8, 1, 3, 5, 7];
+    const preferredMove = strategicOrder.find((idx) => currentBoard[idx] === null);
+    if (preferredMove !== undefined && Math.random() < difficulty) {
+      return preferredMove;
+    }
+
+    if (Math.random() < 0.35) {
+      return availableMoves[Math.floor(Math.random() * availableMoves.length)];
+    }
+
+    return preferredMove !== undefined ? preferredMove : availableMoves[Math.floor(Math.random() * availableMoves.length)];
+  };
+
+  useEffect(() => {
+    if (!aiThinking || winner || isPaused) return;
+
+    const timer = setTimeout(() => {
+      const move = chooseAiMove(board, aiDifficulty);
+      if (move === null || winner) {
+        setAiThinking(false);
+        return;
+      }
+
+      const nextBoard = [...board];
+      nextBoard[move] = 'O';
+      setBoard(nextBoard);
+
+      const nextWinner = checkWinner(nextBoard);
+      if (nextWinner) {
+        setWinner(nextWinner);
+        if (nextWinner === 'O') {
+          setPlayerWinStreak(0);
+          setAiDifficulty((prev) => Math.max(0.35, prev - 0.12));
+        }
+      }
+      setAiThinking(false);
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [aiThinking, board, winner, isPaused, aiDifficulty]);
+
   const handleTileClick = (idx) => {
-    if (board[idx] || winner || isPaused) return;
+    if (board[idx] || winner || isPaused || aiThinking) return;
     const nextBoard = [...board];
     nextBoard[idx] = 'X';
     setBoard(nextBoard);
+
     const win = checkWinner(nextBoard);
-    if (win) setWinner(win);
+    if (win) {
+      setWinner(win);
+      if (win === 'X') {
+        setPlayerWinStreak((prev) => prev + 1);
+        setAiDifficulty((prev) => Math.min(0.9, prev + 0.12 + playerWinStreak * 0.02));
+      }
+      return;
+    }
+
+    if (nextBoard.every((cell) => cell !== null)) {
+      setWinner('Draw');
+      setPlayerWinStreak(0);
+      setAiDifficulty((prev) => Math.max(0.35, prev - 0.06));
+      return;
+    }
+
+    setAiThinking(true);
   };
 
   useEffect(() => {
@@ -629,12 +748,15 @@ function TicTacToeGame({ remoteAction, isPaused, restartCounter, onExit }) {
     else if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START') {
       handleTileClick(cursor);
     }
-  }, [remoteAction, cursor, board, winner, isPaused]);
+  }, [remoteAction, cursor, board, winner, isPaused, aiThinking, playerWinStreak]);
 
   const resetGame = () => {
     setBoard(Array(9).fill(null));
     setWinner(null);
     setCursor(0);
+    setAiThinking(false);
+    setAiDifficulty(0.35);
+    setPlayerWinStreak(0);
   };
 
   return (
@@ -691,25 +813,34 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
   const [grid, setGrid] = useState(Array(ROWS).fill(null).map(() => Array(COLS).fill(null)));
   const [selectedCol, setSelectedCol] = useState(3);
   const [winner, setWinner] = useState(null);
+  const [aiThinking, setAiThinking] = useState(false);
+  const [aiDifficulty, setAiDifficulty] = useState(0.35);
+  const [playerWins, setPlayerWins] = useState(0);
 
   useEffect(() => {
     resetGame();
   }, [restartCounter]);
 
-  const dropDisc = (col) => {
-    if (winner || isPaused) return;
+  const getAvailableRow = (g, col) => {
     for (let r = ROWS - 1; r >= 0; r--) {
-      if (!grid[r][col]) {
-        const nextGrid = grid.map((row) => [...row]);
-        nextGrid[r][col] = 'Red';
-        setGrid(nextGrid);
-        checkWin(nextGrid, r, col, 'Red');
-        break;
-      }
+      if (!g[r][col]) return r;
     }
+    return -1;
   };
 
-  const checkWin = (g, r, c, color) => {
+  const dropDisc = (col, color) => {
+    if (winner || isPaused || col < 0 || col >= COLS) return false;
+    const row = getAvailableRow(grid, col);
+    if (row === -1) return false;
+
+    const nextGrid = grid.map((r) => [...r]);
+    nextGrid[row][col] = color;
+    setGrid(nextGrid);
+    checkWin(nextGrid, row, col, color);
+    return true;
+  };
+
+  const hasConnectFour = (g, r, c, color) => {
     const directions = [
       [[0, 1], [0, -1]],
       [[1, 0], [-1, 0]],
@@ -727,12 +858,225 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
           nc += dc;
         }
       }
-      if (count >= 4) {
-        setWinner(color);
-        return;
+      if (count >= 4) return true;
+    }
+    return false;
+  };
+
+  const checkWin = (g, r, c, color) => {
+    if (hasConnectFour(g, r, c, color)) {
+      setWinner(color);
+      return true;
+    }
+    return false;
+  };
+
+  const findImmediateWinningCol = (g, color) => {
+    for (let col = 0; col < COLS; col++) {
+      const row = getAvailableRow(g, col);
+      if (row === -1) continue;
+      const nextGrid = g.map((r) => [...r]);
+      nextGrid[row][col] = color;
+      if (hasConnectFour(nextGrid, row, col, color)) return col;
+    }
+    return null;
+  };
+
+  const getWinner = (g) => {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const color = g[r][c];
+        if (!color) continue;
+        if (hasConnectFour(g, r, c, color)) return color;
       }
     }
+    return null;
   };
+
+  const boardHeuristic = (g) => {
+    const aiColor = 'Yellow';
+    const humanColor = 'Red';
+    const winner = getWinner(g);
+    if (winner === aiColor) return 1000000;
+    if (winner === humanColor) return -1000000;
+
+    let score = 0;
+    const centerCol = [g[0][3], g[1][3], g[2][3], g[3][3], g[4][3], g[5][3]];
+    score += centerCol.filter((cell) => cell === aiColor).length * 12;
+    score -= centerCol.filter((cell) => cell === humanColor).length * 12;
+
+    const columnWeights = [3, 4, 5, 7, 5, 4, 3];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = g[r][c];
+        if (cell === aiColor) score += columnWeights[c];
+        if (cell === humanColor) score -= columnWeights[c];
+      }
+    }
+
+    const winningMovesAi = findImmediateWinningCol(g, aiColor);
+    const winningMovesHuman = findImmediateWinningCol(g, humanColor);
+    if (winningMovesAi !== null) score += 500;
+    if (winningMovesHuman !== null) score -= 650;
+
+    const lines = [];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS - 3; c++) {
+        lines.push([g[r][c], g[r][c + 1], g[r][c + 2], g[r][c + 3]]);
+      }
+    }
+    for (let c = 0; c < COLS; c++) {
+      for (let r = 0; r < ROWS - 3; r++) {
+        lines.push([g[r][c], g[r + 1][c], g[r + 2][c], g[r + 3][c]]);
+      }
+    }
+    for (let r = 0; r < ROWS - 3; r++) {
+      for (let c = 0; c < COLS - 3; c++) {
+        lines.push([g[r][c], g[r + 1][c + 1], g[r + 2][c + 2], g[r + 3][c + 3]]);
+      }
+    }
+    for (let r = 3; r < ROWS; r++) {
+      for (let c = 0; c < COLS - 3; c++) {
+        lines.push([g[r][c], g[r - 1][c + 1], g[r - 2][c + 2], g[r - 3][c + 3]]);
+      }
+    }
+
+    for (const line of lines) {
+      const aiCount = line.filter((cell) => cell === aiColor).length;
+      const humanCount = line.filter((cell) => cell === humanColor).length;
+      const emptyCount = line.filter((cell) => cell === null).length;
+
+      if (aiCount > 0 && humanCount > 0) continue;
+      if (aiCount === 4) score += 120000;
+      else if (humanCount === 4) score -= 120000;
+      else if (aiCount === 3 && emptyCount === 1) score += 160;
+      else if (humanCount === 3 && emptyCount === 1) score -= 180;
+      else if (aiCount === 2 && emptyCount === 2) score += 26;
+      else if (humanCount === 2 && emptyCount === 2) score -= 32;
+      else if (aiCount === 1 && emptyCount === 3) score += 4;
+      else if (humanCount === 1 && emptyCount === 3) score -= 5;
+    }
+
+    const validCols = [];
+    for (let col = 0; col < COLS; col++) {
+      if (getAvailableRow(g, col) !== -1) validCols.push(col);
+    }
+
+    for (const col of validCols) {
+      const row = getAvailableRow(g, col);
+      const trial = g.map((r) => [...r]);
+      trial[row][col] = aiColor;
+      if (hasConnectFour(trial, row, col, aiColor)) score += 200;
+      const afterHuman = g.map((r) => [...r]);
+      afterHuman[row][col] = humanColor;
+      if (hasConnectFour(afterHuman, row, col, humanColor)) score -= 180;
+    }
+
+    return score;
+  };
+
+  const minimax = (boardState, depth, alpha, beta, maximizingPlayer) => {
+    const winner = getWinner(boardState);
+    if (winner === 'Yellow') return 100000 + depth;
+    if (winner === 'Red') return -100000 - depth;
+    if (depth === 0) return boardHeuristic(boardState);
+
+    const validCols = [3, 2, 4, 1, 5, 0, 6].filter((col) => getAvailableRow(boardState, col) !== -1);
+    if (!validCols.length) return boardHeuristic(boardState);
+
+    if (maximizingPlayer) {
+      let bestScore = -Infinity;
+      for (const col of validCols) {
+        const row = getAvailableRow(boardState, col);
+        const nextBoard = boardState.map((r) => [...r]);
+        nextBoard[row][col] = 'Yellow';
+        const score = minimax(nextBoard, depth - 1, alpha, beta, false);
+        bestScore = Math.max(bestScore, score);
+        alpha = Math.max(alpha, score);
+        if (beta <= alpha) break;
+      }
+      return bestScore;
+    }
+
+    let bestScore = Infinity;
+    for (const col of validCols) {
+      const row = getAvailableRow(boardState, col);
+      const nextBoard = boardState.map((r) => [...r]);
+      nextBoard[row][col] = 'Red';
+      const score = minimax(nextBoard, depth - 1, alpha, beta, true);
+      bestScore = Math.min(bestScore, score);
+      beta = Math.min(beta, score);
+      if (beta <= alpha) break;
+    }
+    return bestScore;
+  };
+
+  const chooseAiMove = () => {
+    const validCols = [3, 2, 4, 1, 5, 0, 6].filter((col) => getAvailableRow(grid, col) !== -1);
+    if (!validCols.length) return null;
+
+    const immediateWin = findImmediateWinningCol(grid, 'Yellow');
+    if (immediateWin !== null) return immediateWin;
+
+    const immediateBlock = findImmediateWinningCol(grid, 'Red');
+    if (immediateBlock !== null) return immediateBlock;
+
+    const depth = aiDifficulty < 0.45 ? 3 : aiDifficulty < 0.75 ? 4 : 5;
+    if (Math.random() < (1 - aiDifficulty) * 0.5) {
+      return validCols[Math.floor(Math.random() * validCols.length)];
+    }
+
+    let bestScore = -Infinity;
+    let bestMove = validCols[0];
+    let alpha = -Infinity;
+    let beta = Infinity;
+
+    for (const col of validCols) {
+      const row = getAvailableRow(grid, col);
+      const nextBoard = grid.map((r) => [...r]);
+      nextBoard[row][col] = 'Yellow';
+      const score = minimax(nextBoard, depth - 1, alpha, beta, false);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = col;
+      }
+      alpha = Math.max(alpha, score);
+    }
+
+    return bestMove;
+  };
+
+  useEffect(() => {
+    if (!aiThinking || winner || isPaused) return;
+
+    const timer = setTimeout(() => {
+      const move = chooseAiMove();
+      if (move === null || winner) {
+        setAiThinking(false);
+        return;
+      }
+
+      const row = getAvailableRow(grid, move);
+      if (row === -1) {
+        setAiThinking(false);
+        return;
+      }
+
+      const nextGrid = grid.map((r) => [...r]);
+      nextGrid[row][move] = 'Yellow';
+      setGrid(nextGrid);
+
+      if (checkWin(nextGrid, row, move, 'Yellow')) {
+        setAiThinking(false);
+        setPlayerWins((prev) => Math.max(0, prev));
+        return;
+      }
+
+      setAiThinking(false);
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [aiThinking, grid, winner, isPaused, aiDifficulty]);
 
   useEffect(() => {
     if (!remoteAction || isPaused) return;
@@ -740,14 +1084,45 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
     if (action === 'LEFT') setSelectedCol((prev) => (prev > 0 ? prev - 1 : COLS - 1));
     else if (action === 'RIGHT') setSelectedCol((prev) => (prev < COLS - 1 ? prev + 1 : 0));
     else if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'DOWN') {
-      dropDisc(selectedCol);
+      if (!aiThinking && !winner) {
+        const availableRow = getAvailableRow(grid, selectedCol);
+        if (availableRow !== -1) {
+          const nextGrid = grid.map((row) => [...row]);
+          nextGrid[availableRow][selectedCol] = 'Red';
+          setGrid(nextGrid);
+          if (checkWin(nextGrid, availableRow, selectedCol, 'Red')) return;
+          setAiThinking(true);
+        }
+      }
     }
-  }, [remoteAction, selectedCol, winner, grid, isPaused]);
+  }, [remoteAction, selectedCol, winner, grid, isPaused, aiThinking]);
+
+  const handlePlayerMove = (col) => {
+    if (aiThinking || winner || isPaused) return;
+    const row = getAvailableRow(grid, col);
+    if (row === -1) return;
+
+    const nextGrid = grid.map((r) => [...r]);
+    nextGrid[row][col] = 'Red';
+    setGrid(nextGrid);
+
+    const playerWon = checkWin(nextGrid, row, col, 'Red');
+    if (playerWon) {
+      setPlayerWins((prev) => prev + 1);
+      setAiDifficulty((prev) => Math.min(0.95, prev + 0.12 + playerWins * 0.03));
+      return;
+    }
+
+    setAiThinking(true);
+  };
 
   const resetGame = () => {
     setGrid(Array(ROWS).fill(null).map(() => Array(COLS).fill(null)));
     setWinner(null);
     setSelectedCol(3);
+    setAiThinking(false);
+    setAiDifficulty(0.35);
+    setPlayerWins(0);
   };
 
   return (
@@ -781,10 +1156,10 @@ function Connect4Game({ remoteAction, isPaused, restartCounter, onExit }) {
                 key={`${rIdx}-${cIdx}`}
                 onClick={() => {
                   setSelectedCol(cIdx);
-                  dropDisc(cIdx);
+                  handlePlayerMove(cIdx);
                 }}
                 className={`w-10 h-10 rounded-full border border-[#30363d] flex items-center justify-center cursor-pointer transition-all ${
-                  cell === 'Red' ? 'bg-[#f85149] border-[#f85149] shadow-[0_0_12px_rgba(248,81,73,0.7)]' : 'bg-[#161b22]'
+                  cell === 'Red' ? 'bg-[#f85149] border-[#f85149] shadow-[0_0_12px_rgba(248,81,73,0.7)]' : cell === 'Yellow' ? 'bg-[#facc15] border-[#facc15] shadow-[0_0_12px_rgba(250,204,21,0.7)]' : 'bg-[#161b22]'
                 }`}
               />
             ))
