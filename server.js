@@ -18,6 +18,14 @@ app.use(express.json());
 
 // Serve static frontend assets built by Vite
 const distPath = path.join(__dirname, 'dist');
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
 app.use(express.static(distPath));
 
 app.get('/health', (req, res) => {
