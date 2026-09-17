@@ -13,72 +13,19 @@ const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3000;
 
 const app = express();
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] }));
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(express.json());
 
-// Path to static frontend assets if built locally or in monorepo container
+// Serve static frontend assets built by Vite
 const distPath = path.join(__dirname, 'dist');
-if (fs.existsSync(distPath)) {
-  app.use('/assets', express.static(path.join(distPath, 'assets')));
-}
+app.use(express.static(distPath));
 
-// Health check endpoints for deployment probes (Render / GCP / AWS)
-const handleHealthCheck = (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    service: 'Air GamePad Backend',
-    socketIo: 'active',
-    timestamp: new Date().toISOString()
-  });
-};
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', service: 'Air GamePad Backend', socketIo: 'active' });
+});
 
-app.get('/health', handleHealthCheck);
-app.get('/api/health', handleHealthCheck);
-
-// Dedicated landing page for backend service URL (https://air-gamepad-backend.onrender.com)
-app.get('/', (req, res) => {
-  if (req.headers.accept && req.headers.accept.includes('application/json')) {
-    return handleHealthCheck(req, res);
-  }
-  
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.status(200).send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Air GamePad - Realtime Signaling Backend</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #0d1117; color: #c9d1d9; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
-    .card { background: #161b22; border: 1px solid #30363d; border-radius: 20px; padding: 40px; max-width: 520px; width: 100%; text-align: center; box-shadow: 0 16px 40px rgba(0,0,0,0.6); }
-    .status-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(0, 255, 133, 0.12); border: 1px solid rgba(0, 255, 133, 0.35); color: #00ff85; padding: 6px 18px; border-radius: 9999px; font-weight: 700; font-size: 13px; font-family: monospace; letter-spacing: 0.5px; margin-bottom: 24px; }
-    .dot { width: 8px; height: 8px; background: #00ff85; border-radius: 50%; box-shadow: 0 0 12px #00ff85; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-    h1 { color: #ffffff; margin: 0 0 10px 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
-    p { color: #8b949e; font-size: 14px; margin: 0 0 24px 0; line-height: 1.6; }
-    .metrics { background: #0d1117; border: 1px solid #30363d; border-radius: 12px; padding: 16px; margin-bottom: 28px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #58a6ff; text-align: left; line-height: 1.8; }
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #58a6ff; color: #0d1117; text-decoration: none; padding: 14px 28px; border-radius: 12px; font-weight: 700; font-size: 15px; width: 100%; transition: all 0.2s ease; box-shadow: 0 0 20px rgba(88, 166, 255, 0.3); }
-    .btn:hover { background: #79c0ff; transform: translateY(-2px); box-shadow: 0 0 30px rgba(88, 166, 255, 0.5); }
-    .footer { margin-top: 24px; font-size: 12px; color: #484f58; font-family: monospace; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="status-badge"><span class="dot"></span> BACKEND SERVICE ONLINE</div>
-    <h1>Air GamePad Backend</h1>
-    <p>Real-time WebSockets stream & peer signaling server is fully operational on Render.</p>
-    <div class="metrics">
-      <div>✔ Socket.IO Engine: Active</div>
-      <div>✔ Sub-8ms Protocol: Operational</div>
-      <div>✔ CORS Gateway: Enabled (*)</div>
-      <div>✔ Active Game Rooms: ${rooms.size}</div>
-    </div>
-    <a href="https://air-gamepad.onrender.com" class="btn">Launch Game Controller App &rarr;</a>
-    <div class="footer">Frontend: https://air-gamepad.onrender.com</div>
-  </div>
-</body>
-</html>`);
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', service: 'Air GamePad Backend', socketIo: 'active' });
 });
 
 const httpServer = createServer(app);
@@ -436,19 +383,13 @@ app.get('/api/room/:code', (req, res) => {
   res.json(room);
 });
 
-// Wildcard route fallback
+// Wildcard SPA route fallback to send index.html for client-side routing (e.g., /join?code=XXXX)
 app.use((req, res) => {
   const indexPath = path.join(distPath, 'index.html');
-  if (fs.existsSync(indexPath) && !req.path.startsWith('/api') && !req.path.startsWith('/socket.io')) {
+  if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).json({
-      status: 'error',
-      message: `Route '${req.path}' not found on Air GamePad Backend.`,
-      service: 'Air GamePad Backend',
-      socketIo: 'active',
-      frontendUrl: 'https://air-gamepad.onrender.com'
-    });
+    res.json({ status: 'ok', service: 'Air GamePad Backend', socketIo: 'active' });
   }
 });
 
