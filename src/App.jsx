@@ -34,9 +34,11 @@ import {
 
 // Connect to Socket.IO backend server (Render deployment URL vs Localhost fallback)
 const socketHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost';
-export const BACKEND_URL = typeof window !== 'undefined' && window.location.hostname.endsWith('onrender.com')
-  ? 'https://air-gamepad-backend.onrender.com'
-  : `http://${socketHost}:3000`;
+export const BACKEND_URL = typeof window !== 'undefined'
+  ? (window.location.hostname.endsWith('onrender.com') || window.location.port !== '5173'
+      ? window.location.origin
+      : `http://${socketHost}:3000`)
+  : 'http://localhost:3000';
 
 const socket = io(BACKEND_URL, {
   autoConnect: true,
@@ -992,9 +994,9 @@ export default function App() {
   const getControllerUrl = () => {
     const code = roomState.code || roomCode || '';
     if (typeof window !== 'undefined') {
-      const { hostname, protocol, port } = window.location;
+      const { hostname, origin, port } = window.location;
       if (hostname.endsWith('onrender.com') || (hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.match(/^\d+\.\d+\.\d+\.\d+$/))) {
-        return `${protocol}//${hostname}/join?code=${code}`;
+        return `${origin}/join?code=${code}`;
       }
       const hostIp = serverIp || hostname || '127.0.0.1';
       const portStr = port ? `:${port}` : ':5173';

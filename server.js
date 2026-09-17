@@ -3,12 +3,24 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(express.json());
 
-app.get('/', (req, res) => {
+// Serve static frontend assets built by Vite
+const distPath = path.join(__dirname, 'dist');
+app.use(express.static(distPath));
+
+app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'Air GamePad Backend', socketIo: 'active' });
 });
 
@@ -364,7 +376,16 @@ app.get('/api/room/:code', (req, res) => {
   res.json(room);
 });
 
-const PORT = process.env.PORT || 3000;
+// Wildcard SPA route fallback to send index.html for client-side routing (e.g., /join?code=XXXX)
+app.use((req, res) => {
+  const indexPath = path.join(distPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.json({ status: 'ok', service: 'Air GamePad Backend', socketIo: 'active' });
+  }
+});
+
 httpServer.listen(PORT, '0.0.0.0', () => {
   const localIp = getLocalIpAddress();
   console.log(`[Air GamePad Server] Socket.IO & REST Server running on 0.0.0.0:${PORT}`);
