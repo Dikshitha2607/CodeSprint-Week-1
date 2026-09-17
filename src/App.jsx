@@ -1391,10 +1391,17 @@ export default function App() {
         
         {/* Top Status Bar */}
         <div className="max-w-4xl mx-auto w-full flex items-center justify-between text-xs font-mono-code text-[#8b949e] border-b border-[#30363d]/60 pb-3 mb-6 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setCurrentView('landing')}
+              className="px-3 py-1 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#58a6ff] text-[#c9d1d9] hover:text-[#58a6ff] text-xs font-mono-code flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Home</span>
+            </button>
             <span className="w-2 h-2 rounded-full bg-[#00ff85] animate-pulse"></span>
             <span className="text-[#00ff85] font-bold">AIR GAMEPAD LOBBY</span>
-            <span>/ ONLINE SESSION</span>
+            <span className="hidden sm:inline">/ ONLINE SESSION</span>
           </div>
           <div className="flex items-center gap-2">
             <span>STREAM: ACTIVE</span>
