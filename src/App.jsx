@@ -759,6 +759,16 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isGeneratingCode]);
 
+  // Helper to generate a random fallback room code if server room code response is delayed
+  const generateFallbackRoomCode = () => {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let result = '';
+    for (let i = 0; i < 4; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  };
+
   // Socket.IO Listener Setup & Initial Room Creation
   useEffect(() => {
     // Check if joining via URL ?code=XXXX or /join path
@@ -766,34 +776,46 @@ export default function App() {
     const codeParam = urlParams.get('code');
     const isJoinPath = window.location.pathname.includes('/join');
 
-    if (codeParam || isJoinPath) {
-      const code = (codeParam || '').toUpperCase();
-      if (code) setRoomCode(code);
-      setCurrentView('controller');
-      const savedName = localStorage.getItem('air_player_name');
-      if (savedName && code) {
-        socket.emit('join_room', {
-          roomCode: code,
-          playerName: savedName,
-          deviceName: 'Mobile Controller (' + (navigator.platform || 'Handheld') + ')'
-        });
+    const handleConnect = () => {
+      console.log('[Socket.io] Connected to server, socket.id:', socket.id);
+      if (codeParam || isJoinPath) {
+        const code = (codeParam || '').toUpperCase();
+        if (code) setRoomCode(code);
+        setCurrentView('controller');
+        const savedName = localStorage.getItem('air_player_name');
+        if (savedName && code) {
+          socket.emit('join_room', {
+            roomCode: code,
+            playerName: savedName,
+            deviceName: 'Mobile Controller (' + (navigator.platform || 'Handheld') + ')'
+          });
+        }
+      } else {
+        // Host PC display - register host socket & create dynamic room
+        socket.emit('register_host');
+        socket.emit('create_room');
       }
-    } else {
-      // Host PC display - register host socket & create dynamic room immediately
-      socket.emit('register_host');
-      socket.emit('create_room');
+    };
+
+    socket.on('connect', handleConnect);
+    if (socket.connected) {
+      handleConnect();
     }
 
     socket.on('room_created', (data) => {
       console.log('[Socket.io] Room created by host display:', data);
-      setRoomState(data);
-      if (data && data.code) setRoomCode(data.code);
+      if (data && data.code) {
+        setRoomState(data);
+        setRoomCode(data.code);
+      }
     });
 
     socket.on('room_updated', (data) => {
       console.log('[Socket.io] Room update received:', data);
-      setRoomState(data);
-      if (data && data.code) setRoomCode(data.code);
+      if (data && data.code) {
+        setRoomState(data);
+        setRoomCode(data.code);
+      }
     });
 
     socket.on('diagnostics_result', (res) => {
@@ -811,6 +833,7 @@ export default function App() {
     });
 
     return () => {
+      socket.off('connect', handleConnect);
       socket.off('room_created');
       socket.off('room_updated');
       socket.off('diagnostics_result');
@@ -883,6 +906,9 @@ export default function App() {
   const handleStartGameRoom = () => {
     setIsGeneratingCode(true);
     setCurrentView('lobby');
+    if (!socket.connected) {
+      socket.connect();
+    }
     socket.emit('create_room');
 
     if (codeGenTimerRef.current) {
@@ -891,6 +917,15 @@ export default function App() {
     // Show scrambler animation for exactly 2.5 seconds before revealing room code
     codeGenTimerRef.current = setTimeout(() => {
       setIsGeneratingCode(false);
+      setRoomCode((prev) => {
+        const currentCode = prev || roomState.code;
+        if (!currentCode) {
+          const fallback = generateFallbackRoomCode();
+          setRoomState((r) => ({ ...r, code: fallback }));
+          return fallback;
+        }
+        return currentCode;
+      });
     }, 2500);
   };
 
@@ -955,12 +990,17 @@ export default function App() {
 
   // Helper to build Controller Join URL (Render deployment vs Local LAN IPv4)
   const getControllerUrl = () => {
-    if (typeof window !== 'undefined' && window.location.hostname.endsWith('onrender.com')) {
-      return `https://${window.location.hostname}/join?code=${roomState.code || roomCode}`;
+    const code = roomState.code || roomCode || '';
+    if (typeof window !== 'undefined') {
+      const { hostname, protocol, port } = window.location;
+      if (hostname.endsWith('onrender.com') || (hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.match(/^\d+\.\d+\.\d+\.\d+$/))) {
+        return `${protocol}//${hostname}/join?code=${code}`;
+      }
+      const hostIp = serverIp || hostname || '127.0.0.1';
+      const portStr = port ? `:${port}` : ':5173';
+      return `http://${hostIp}${portStr}/join?code=${code}`;
     }
-    const hostIp = serverIp || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' ? window.location.hostname : '127.0.0.1');
-    const port = typeof window !== 'undefined' && window.location.port ? `:${window.location.port}` : ':5173';
-    return `http://${hostIp}${port}/join?code=${roomState.code || roomCode}`;
+    return `/join?code=${code}`;
   };
 
   // Copy Link Handler
