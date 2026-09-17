@@ -863,6 +863,12 @@ export default function App() {
       console.log('[Socket.io] Remote controller action received:', action);
       setRemoteEvent({ action, timestamp: Date.now() });
 
+      const view = currentViewRef.current;
+      // If this instance is the Dedicated Mobile Controller view, keep mobile on the gamepad UI!
+      if (view === 'controller') {
+        return;
+      }
+
       if (action === 'PAUSE') {
         setIsGamePaused((prev) => !prev);
         return;
@@ -878,7 +884,6 @@ export default function App() {
         return;
       }
 
-      const view = currentViewRef.current;
       if (view === 'arena') {
         if (action === 'LEFT') {
           setSelectedGameIndex((prev) => (prev > 0 ? prev - 1 : 4));
