@@ -85,43 +85,26 @@
   background: #8b949e;
 }
 
-/* Game animations */
+/* Game animations - Smooth, clean, lightweight */
 @keyframes popIn {
   0% {
-    transform: scale(0) rotate(-20deg);
+    transform: scale(0.6);
     opacity: 0;
   }
-  70% {
-    transform: scale(1.15) rotate(4deg);
-    opacity: 1;
-  }
   100% {
-    transform: scale(1) rotate(0deg);
+    transform: scale(1);
     opacity: 1;
   }
 }
 
 .animate-pop-in {
-  animation: popIn 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes dropDisc {
   0% {
-    transform: translateY(-280px);
+    transform: translateY(-160px);
     opacity: 0.2;
-  }
-  65% {
-    transform: translateY(0);
-    opacity: 1;
-  }
-  80% {
-    transform: translateY(-16px);
-  }
-  92% {
-    transform: translateY(0);
-  }
-  97% {
-    transform: translateY(-4px);
   }
   100% {
     transform: translateY(0);
@@ -130,21 +113,22 @@
 }
 
 .animate-drop-disc {
-  animation: dropDisc 0.42s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  animation: dropDisc 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 
 @keyframes winPulse {
   0%, 100% {
     transform: scale(1);
-    box-shadow: 0 0 16px rgba(0, 255, 133, 0.7);
+    box-shadow: 0 0 12px rgba(0, 255, 133, 0.6);
   }
   50% {
-    transform: scale(1.08);
-    box-shadow: 0 0 28px rgba(0, 255, 133, 1);
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(0, 255, 133, 0.9);
   }
 }
 
 .animate-win-pulse {
   animation: winPulse 1.2s infinite ease-in-out;
 }
+
 

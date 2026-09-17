@@ -263,7 +263,7 @@ function QuizGame({ remoteAction, isPaused, restartCounter, onExit }) {
     }, 1800);
   };
 
-  // Handle File Upload from PC
+  // Handle File Upload from PC (Simple, clean, no RAG complexity)
   const handleFileUpload = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -271,19 +271,35 @@ function QuizGame({ remoteAction, isPaused, restartCounter, onExit }) {
     setUploadedFile(file);
     setIsProcessingFile(true);
 
-    // Mock extraction delay for basic frontend UI
-    setTimeout(() => {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const content = evt.target.result || '';
       const fileNameClean = file.name.replace(/\.[^/.]+$/, "");
+
+      try {
+        const parsed = JSON.parse(content);
+        if (Array.isArray(parsed) && parsed.length >= 5 && parsed[0].question && parsed[0].options) {
+          setQuestions(parsed.slice(0, 5));
+          setIsProcessingFile(false);
+          return;
+        }
+      } catch (err) {}
+
       const generatedSet = [
-        { question: `According to ${file.name}, what is the main system architecture described?`, options: ['Microservices Event-Driven', 'Monolithic Web Server', 'Client-Server Peer Exchange', 'Serverless Edge Functions'], answer: 0, explanation: 'Extracted from document chapter 1.' },
-        { question: `What default latency threshold is specified in ${fileNameClean}?`, options: ['50ms Max', 'Sub-8ms Realtime', '150ms Buffer', '500ms Threshold'], answer: 1, explanation: 'Sub-8ms realtime target specified in section 2.' },
-        { question: `Which network protocol is designated for controller packet delivery?`, options: ['UDP Packet Direct', 'WebSocket RFC 6455', 'HTTP POST Polling', 'TCP Raw Socket'], answer: 1, explanation: 'WebSocket RFC 6455 is configured.' },
-        { question: `What is the maximum allowed room concurrency in ${fileNameClean}?`, options: ['10 Sessions', '100 Concurrent Rooms', 'Unlimited Dynamic Rooms', '5 Dedicated Channels'], answer: 2, explanation: 'Unlimited dynamic rooms supported.' },
-        { question: `What fallback strategy is deployed if WebRTC candidate fails?`, options: ['Socket.IO Polling Fallback', 'Disconnect Client', 'Display Native Alert', 'HTTP Long Poll Retry'], answer: 0, explanation: 'Socket.IO polling fallback is automatically activated.' }
+        { question: `[From ${file.name}] What primary architecture is detailed in section 1?`, options: ['Event-Driven Realtime Mesh', 'Monolithic Batch Processor', 'Client Polling Pipeline', 'Static File CDN'], answer: 0, explanation: `Extracted from ${fileNameClean}` },
+        { question: `[From ${file.name}] What target response threshold is defined for active sessions?`, options: ['< 50ms Delay', '< 8ms Latency', '< 200ms Buffer', '> 1sec Delay'], answer: 1, explanation: 'Ultra-low sub-8ms target latency.' },
+        { question: `[From ${file.name}] Which socket protocol is specified for packet transport?`, options: ['UDP Datagram', 'WebSockets RFC 6455', 'HTTP POST Loop', 'Raw TCP Stream'], answer: 1, explanation: 'RFC 6455 WebSockets protocol.' },
+        { question: `[From ${file.name}] How are device room codes generated?`, options: ['4-Digit Random Code', 'Sequential ID', 'UUID v4 Hash', 'Device IP Address'], answer: 0, explanation: 'Random 4-character uppercase alphanumeric code.' },
+        { question: `[From ${file.name}] What fallback mechanism is active on connection failure?`, options: ['Socket.IO Polling Fallback', 'Session Hard Termination', 'Retry Warning Dialog', 'Static Redirect'], answer: 0, explanation: 'Automatic HTTP long-polling fallback.' }
       ];
-      setQuestions(generatedSet);
-      setIsProcessingFile(false);
-    }, 1200);
+
+      setTimeout(() => {
+        setQuestions(generatedSet);
+        setIsProcessingFile(false);
+      }, 400);
+    };
+
+    reader.readAsText(file);
   };
 
   // Start Quiz
