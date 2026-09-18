@@ -1,5 +1,10 @@
 node_modules
 dist
+.env
+.env.*
+!.env.example
+__pycache__/
+air_game_pad_venv/
 .DS_Store
 notes/
 notes.index

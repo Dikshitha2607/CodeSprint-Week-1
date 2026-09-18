@@ -1,127 +1,153 @@
-import faiss
-import numpy as np
+"""Offline-retrieval RAG quiz generator used by the Air GamePad API.
+
+The retrieval step uses only the Python standard library, so uploads never
+download a Hugging Face model or require a Hugging Face token at runtime.
+"""
+import argparse
 import json
-from pathlib import Path
-from pypdf import PdfReader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
+import math
 import os
-from groq import Groq
+import re
+from collections import Counter
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-PDF_PATH = Path(r"C:\Users\Dikshitha\codesprint\notes\dwdmsem5.pdf")
+MAX_TEXT_CHARS = 70_000
+SUPPORTED_SUFFIXES = {'.pdf', '.docx', '.txt', '.md', '.csv', '.json'}
+STOP_WORDS = {'about', 'after', 'also', 'and', 'are', 'been', 'being', 'but', 'can', 'each', 'for', 'from', 'have', 'into', 'its', 'more', 'not', 'only', 'other', 'our', 'that', 'the', 'their', 'this', 'these', 'they', 'was', 'were', 'what', 'when', 'where', 'which', 'with', 'would', 'your'}
 
-#Extracting text from PDF
-def extract_text(pdf_path):
-    reader = PdfReader(str(pdf_path))
-    text = ""
-    for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text += page_text + "\n"
-    return text
 
-#Splitting text into chunks
-def split_text(text):
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50
-    )
-    chunks = splitter.split_text(text)
+def load_local_env():
+    """Load this project's untracked .env without replacing deployment vars."""
+    env_path = Path(__file__).with_name('.env')
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            key, value = line.split('=', 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def extract_text(file_path):
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+    if suffix not in SUPPORTED_SUFFIXES:
+        raise ValueError('Unsupported file type. Upload PDF, DOCX, TXT, MD, CSV, or JSON.')
+    if suffix == '.pdf':
+        from pypdf import PdfReader
+        try:
+            return '\n'.join(page.extract_text() or '' for page in PdfReader(path).pages)
+        except Exception as error:
+            raise ValueError('This PDF could not be read. Use a text-based PDF (not a scanned image) or export it as TXT.') from error
+    if suffix == '.docx':
+        from docx import Document
+        return '\n'.join(paragraph.text for paragraph in Document(path).paragraphs)
+    return path.read_text(encoding='utf-8', errors='ignore')
+
+
+def chunk_text(text, size=1100, overlap=160):
+    chunks, start = [], 0
+    while start < len(text):
+        end = min(len(text), start + size)
+        if end < len(text):
+            boundary = max(text.rfind('\n', start + size // 2, end), text.rfind(' ', start + size // 2, end))
+            if boundary > start:
+                end = boundary
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(text):
+            break
+        start = max(end - overlap, start + 1)
     return chunks
 
-#Converting chunks into embeddings
-def create_embeddings(chunks):
-    embeddings_model = HuggingFaceEmbeddings(
-        model_name="BAAI/bge-small-en-v1.5"
-    )
-    embeddings = embeddings_model.embed_documents(chunks)
-    return embeddings
 
-#Creating a vector store using FAISS
-def create_vector_store(embeddings, chunks):
-    embedding_array = np.array(embeddings, dtype="float32")
-    dimension = embedding_array.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embedding_array)
-    faiss.write_index(index, "notes.index")
-    with open("chunks.json", "w", encoding="utf-8") as f:
-        json.dump(chunks, f, ensure_ascii=False, indent=2)
-    return index
+def tokens(text):
+    return [word for word in re.findall(r"[a-zA-Z][a-zA-Z0-9'-]{2,}", text.lower()) if word not in STOP_WORDS]
 
-#Searching for relevant chunks based on a question
-def search_chunks(question, index, chunks, k=3):
-    embeddings_model = HuggingFaceEmbeddings(
-        model_name="BAAI/bge-small-en-v1.5"
-    )
-    question_embedding = embeddings_model.embed_query(question)
-    question_array = np.array([question_embedding], dtype="float32")
 
-    distances, indices = index.search(question_array, k)
-    results = []
-    for i in indices[0]:
-        if i != -1:
-            results.append(chunks[i])
-    return results
+def retrieve_context(chunks, limit=6):
+    """Local TF-IDF retrieval with diversity; no remote embedding model needed."""
+    document_frequency, chunk_tokens = Counter(), []
+    for chunk in chunks:
+        terms = tokens(chunk)
+        chunk_tokens.append(terms)
+        document_frequency.update(set(terms))
+    total_chunks = max(1, len(chunks))
+    scores = []
+    for index, terms in enumerate(chunk_tokens):
+        counts = Counter(terms)
+        score = sum((1 + math.log(count)) * math.log((total_chunks + 1) / (document_frequency[word] + 1) + 1)
+                    for word, count in counts.items()) / max(1, len(terms))
+        scores.append((score, index))
+    selected = []
+    for _, index in sorted(scores, reverse=True):
+        if all(abs(index - prior) > 1 for prior in selected):
+            selected.append(index)
+        if len(selected) == min(limit, len(chunks)):
+            break
+    if not selected:
+        selected = list(range(min(limit, len(chunks))))
+    return '\n\n---\n\n'.join(chunks[index] for index in sorted(selected))
 
-#Generating quiz question using Groq
-def generate_quiz(retrieved_chunks):
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-    context = "\n\n".join(retrieved_chunks)
-    prompt = f"""
-You are an AI quiz generator.
-Generate exactly 5 different multiple-choice questions based ONLY on the provided context.
 
-Context:
-{context}
+def validate_quiz(quiz):
+    questions = quiz.get('questions') if isinstance(quiz, dict) else None
+    if not isinstance(questions, list) or len(questions) != 5:
+        raise ValueError('Groq returned an invalid quiz: exactly five questions are required.')
+    cleaned = []
+    for question in questions:
+        options = question.get('options') if isinstance(question, dict) else None
+        answer = question.get('answer') if isinstance(question, dict) else None
+        if (not isinstance(question.get('question'), str) or not isinstance(options, list)
+                or len(options) != 4 or not isinstance(answer, int) or answer not in range(4)):
+            raise ValueError('Groq returned an invalid quiz question. Please try the upload again.')
+        cleaned.append({'question': question['question'].strip(), 'options': [str(option).strip() for option in options], 'answer': answer, 'explanation': str(question.get('explanation', '')).strip()})
+    return {'questions': cleaned}
 
-Requirements:
-Generate exactly 5 questions. Each question must have 4 options: A, B, C, D.Each question must have only one correct answer. 
-Questions must be different from each other. Do not repeat the same concept unnecessarily. Do not use information outside the provided context.
-Keep the questions suitable for a student quiz.Return ONLY valid JSON in this format:
-{{
-  "questions": [
-    {{
-      "question": "Question text",
-      "options": {{
-        "A": "Option A",
-        "B": "Option B",
-        "C": "Option C",
-        "D": "Option D"
-      }},
-      "answer": "A"
-    }}
-  ]
-}}
-"""
-    response = client.chat.completions.create(
-        model="openai/gpt-oss-20b",
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"}
-    )
-    return response.choices[0].message.content
 
-if __name__ == "__main__":
-    print("Reading PDF...")
-    text = extract_text(PDF_PATH)
-    print(f"Extracted {len(text)} characters.")
-    print("\nSplitting text into chunks...")
-    chunks = split_text(text)
-    print(f"Created {len(chunks)} chunks.")
-print("\nCreating embeddings...")
-embeddings = create_embeddings(chunks)
-print(f"Created {len(embeddings)} embeddings.")
-print(f"Each embedding has {len(embeddings[0])} numbers.")
+def generate(file_path):
+    text = extract_text(file_path).strip()
+    if not text:
+        raise ValueError('No readable text was found. Scanned PDFs need OCR or should be exported as a text-based PDF.')
+    context = retrieve_context(chunk_text(text[:MAX_TEXT_CHARS]))
+    api_key = os.environ.get('GROQ_API_KEY')
+    if not api_key:
+        raise ValueError('GROQ_API_KEY is not configured. Add it to the local .env file.')
+    prompt = '''Create exactly 5 fair multiple-choice study questions using only the supplied document context. Return JSON only: {"questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}]}. Each question needs exactly four distinct options. answer is the zero-based correct-option index. Never use facts outside the context.\n\nDocument context:\n''' + context
+    payload = json.dumps({'model': os.environ.get('GROQ_MODEL', 'openai/gpt-oss-20b'), 'messages': [{'role': 'system', 'content': 'You create accurate grounded quizzes. Return valid JSON only.'}, {'role': 'user', 'content': prompt}], 'response_format': {'type': 'json_object'}, 'temperature': 0.2, 'max_tokens': 1800}).encode('utf-8')
+    # Groq's Cloudflare edge rejects Python's default "Python-urllib/..."
+    # signature with error 1010. Identify this application explicitly.
+    request = Request('https://api.groq.com/openai/v1/chat/completions', data=payload, headers={
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json',
+        'User-Agent': 'AirGamePad-RAG/1.0',
+    }, method='POST')
+    try:
+        with urlopen(request, timeout=90) as response:
+            result = json.loads(response.read().decode('utf-8'))
+    except HTTPError as error:
+        details = error.read().decode('utf-8', errors='replace')[:500]
+        raise ValueError(f'Groq request failed ({error.code}): {details}') from error
+    except URLError as error:
+        raise ValueError(f'Could not reach the Groq API: {error.reason}') from error
+    content = result.get('choices', [{}])[0].get('message', {}).get('content')
+    if not content:
+        raise ValueError('Groq returned an empty quiz response.')
+    try:
+        return validate_quiz(json.loads(content))
+    except json.JSONDecodeError as error:
+        raise ValueError('Groq returned invalid JSON. Please upload again.') from error
 
-print("\nCreating vector store...")
-index = create_vector_store(embeddings, chunks)
-print(f"Stored {index.ntotal} embeddings in FAISS.")
 
-print("\nSearching for relevant chunks...")
-question = "Generate quiz questions from this study material."
-results = search_chunks(question, index, chunks)
-print("\nGenerating 5-question quiz with Groq...")
-quiz = generate_quiz(results)
-print("\n--- Generated Quiz ---")
-print(quiz)
+if __name__ == '__main__':
+    load_local_env()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input', required=True)
+    try:
+        print(json.dumps(generate(parser.parse_args().input)))
+    except Exception as error:
+        print(json.dumps({'error': str(error)}))
+        raise SystemExit(1)

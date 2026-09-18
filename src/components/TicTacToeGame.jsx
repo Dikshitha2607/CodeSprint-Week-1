@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { RotateCcw, Bot, Users, Trophy, Sparkles, ChevronRight, Gamepad2 } from 'lucide-react';
+import { RotateCcw, Bot, Trophy } from 'lucide-react';
 import { playSound } from '../utils/audio';
+import EndGameActions from './EndGameActions';
 
 // 8 Winning Triples
 const WINNING_LINES = [
@@ -9,18 +10,21 @@ const WINNING_LINES = [
   [0, 4, 8], [2, 4, 6]             // Diagonals
 ];
 
+const createOpeningBoard = () => Array(9).fill(null);
+
 export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, onExit }) {
-  const [board, setBoard] = useState(Array(9).fill(null));
-  const [turn, setTurn] = useState('X'); // 'X' always goes first
-  const [cursor, setCursor] = useState(4); // Default center cursor
-  const [gameMode, setGameMode] = useState('1P'); // '1P' (vs Bot) | '2P' (Local / 2 Players)
-  const [aiDifficulty, setAiDifficulty] = useState('medium'); // 'easy' | 'medium' | 'master'
+  // A classic, empty board lets either player take the centre naturally.
+  const [board, setBoard] = useState(createOpeningBoard);
+  const [turn, setTurn] = useState('X');
+  const [cursor, setCursor] = useState(4);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [winResult, setWinResult] = useState(null); // null | { winner: 'X'|'O', line: [a,b,c] } | { winner: 'Draw' }
   const [scores, setScores] = useState({ x: 0, o: 0, ties: 0 });
   const [hoveredCell, setHoveredCell] = useState(null);
+  const [endChoice, setEndChoice] = useState(0);
 
   const lastHandledTimeRef = useRef(0);
+  const lastNavigationAtRef = useRef(0);
 
   // Check Winner Helper
   const evaluateBoard = useCallback((b) => {
@@ -69,64 +73,40 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
     }
   }, [evaluateBoard]);
 
-  // AI Move Selector
-  const getAiMove = useCallback((currentBoard, difficulty) => {
+  // The bot evaluates every possible continuation. Tic Tac Toe is small
+  // enough that this is instant and means it never overlooks a forced win.
+  const getAiMove = useCallback((currentBoard) => {
     const emptyIndices = currentBoard
       .map((val, idx) => (val === null ? idx : null))
       .filter((v) => v !== null);
 
     if (emptyIndices.length === 0) return null;
 
-    // Easy: 70% random, 30% smart
-    if (difficulty === 'easy') {
-      if (Math.random() < 0.7) {
-        return emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-      }
-    }
+    // A small amount of intentional imperfection makes the solo game
+    // winnable while retaining the bot's strong tactical play most turns.
+    if (Math.random() < 0.38) return emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
 
-    // Medium: Block immediate opponent win or take immediate win, otherwise 40% random
-    if (difficulty === 'medium') {
-      // 1. Check if AI can win immediately
-      for (const idx of emptyIndices) {
-        const test = [...currentBoard];
-        test[idx] = 'O';
-        const res = evaluateBoard(test);
-        if (res && res.winner === 'O') return idx;
-      }
-      // 2. Check if Human can win immediately and block
-      for (const idx of emptyIndices) {
-        const test = [...currentBoard];
-        test[idx] = 'X';
-        const res = evaluateBoard(test);
-        if (res && res.winner === 'X') return idx;
-      }
-      // 3. Take center if available
-      if (currentBoard[4] === null && Math.random() < 0.6) return 4;
-
-      if (Math.random() < 0.4) {
-        return emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-      }
-    }
-
-    // Master / Unbeatable Minimax
-    let bestScore = -Infinity;
     let bestMove = emptyIndices[0];
-
+    let bestScore = -Infinity;
     for (const idx of emptyIndices) {
-      const copyBoard = [...currentBoard];
-      copyBoard[idx] = 'O';
-      const score = minimax(copyBoard, 0, false);
+      const test = [...currentBoard];
+      test[idx] = 'O';
+      const score = minimax(test, 0, false);
       if (score > bestScore) {
         bestScore = score;
         bestMove = idx;
       }
     }
     return bestMove;
-  }, [evaluateBoard, minimax]);
+  }, [minimax]);
 
   // Apply a move
   const makeMove = useCallback((idx, player) => {
     if (board[idx] !== null || winResult !== null || isPaused) return false;
+    // X belongs to the player and O belongs to the scheduled bot turn. This
+    // prevents rapid clicks/remote events from placing a bot piece manually.
+    if ((player === 'X' && turn !== 'X') ||
+        (player === 'O' && turn !== 'O')) return false;
 
     const nextBoard = [...board];
     nextBoard[idx] = player;
@@ -141,7 +121,7 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
         playSound('win');
       } else if (result.winner === 'O') {
         setScores((s) => ({ ...s, o: s.o + 1 }));
-        playSound(gameMode === '1P' ? 'wrong' : 'win');
+        playSound('wrong');
       } else {
         setScores((s) => ({ ...s, ties: s.ties + 1 }));
       }
@@ -152,18 +132,18 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
     const nextTurn = player === 'X' ? 'O' : 'X';
     setTurn(nextTurn);
     return true;
-  }, [board, winResult, isPaused, evaluateBoard, gameMode]);
+  }, [board, turn, winResult, isPaused, evaluateBoard]);
 
   // Handle AI turn when in 1P mode
   useEffect(() => {
-    if (gameMode !== '1P' || turn !== 'O' || winResult !== null || isPaused || isAiThinking) {
+    if (turn !== 'O' || winResult !== null || isPaused) {
       return;
     }
 
     setIsAiThinking(true);
     const delay = Math.floor(350 + Math.random() * 250);
     const timer = setTimeout(() => {
-      const move = getAiMove(board, aiDifficulty);
+      const move = getAiMove(board);
       if (move !== null && board[move] === null) {
         makeMove(move, 'O');
       }
@@ -171,15 +151,19 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
     }, delay);
 
     return () => clearTimeout(timer);
-  }, [gameMode, turn, winResult, isPaused, isAiThinking, board, aiDifficulty, getAiMove, makeMove]);
+    // Do not depend on isAiThinking here. Setting it to true re-renders the
+    // component; having it as a dependency used to clean up this timeout
+    // before the bot could place its move.
+  }, [turn, winResult, isPaused, board, getAiMove, makeMove]);
 
   // Reset Game
   const resetGame = useCallback(() => {
-    setBoard(Array(9).fill(null));
+    setBoard(createOpeningBoard());
     setTurn('X');
     setWinResult(null);
     setIsAiThinking(false);
     setCursor(4);
+    setEndChoice(0);
   }, []);
 
   // Handle external restartCounter trigger
@@ -198,13 +182,20 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
     lastHandledTimeRef.current = timestamp || Date.now();
 
     if (winResult !== null) {
-      if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START' || action === 'UP' || action === 'DOWN') {
-        resetGame();
-      }
+      if (action === 'LEFT' || action === 'RIGHT') setEndChoice((choice) => choice === 0 ? 1 : 0);
+      else if (action === 'ACTION_A' || action === 'START') endChoice === 0 ? resetGame() : onExit();
       return;
     }
 
     if (isAiThinking) return;
+
+    // Mobile controllers can emit repeated direction events while a button is
+    // held. Keep cursor movement deliberate and readable.
+    if (['LEFT', 'RIGHT', 'UP', 'DOWN'].includes(action)) {
+      const now = Date.now();
+      if (now - lastNavigationAtRef.current < 140) return;
+      lastNavigationAtRef.current = now;
+    }
 
     if (action === 'LEFT') {
       playSound('move');
@@ -219,7 +210,7 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
       playSound('move');
       setCursor((prev) => (prev <= 5 ? prev + 3 : prev - 6));
     } else if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START') {
-      makeMove(cursor, turn);
+      makeMove(cursor, 'X');
     }
   }, [remoteAction, isPaused, winResult, isAiThinking, cursor, turn, makeMove, resetGame]);
 
@@ -229,10 +220,8 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
       if (isPaused) return;
 
       if (winResult !== null) {
-        if (e.key === ' ' || e.key === 'Enter' || e.key === 'r' || e.key === 'R') {
-          e.preventDefault();
-          resetGame();
-        }
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setEndChoice((choice) => choice === 0 ? 1 : 0); }
+        else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); endChoice === 0 ? resetGame() : onExit(); }
         return;
       }
 
@@ -257,18 +246,18 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
         setCursor((prev) => (prev <= 5 ? prev + 3 : prev - 6));
       } else if (e.key === ' ' || e.key === 'Enter') {
         e.preventDefault();
-        makeMove(cursor, turn);
+        makeMove(cursor, 'X');
       } else if (e.key >= '1' && e.key <= '9') {
         e.preventDefault();
         const targetIdx = parseInt(e.key, 10) - 1;
         setCursor(targetIdx);
-        makeMove(targetIdx, turn);
+        makeMove(targetIdx, 'X');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPaused, winResult, isAiThinking, cursor, turn, makeMove, resetGame]);
+  }, [isPaused, winResult, isAiThinking, cursor, turn, makeMove, resetGame, endChoice, onExit]);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[620px] bg-[#0b0e14] text-[#ffffff] p-4 sm:p-6 select-none">
@@ -283,39 +272,12 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
             <div className="flex items-center gap-2 text-[11px] font-mono-code text-[#8b949e]">
               <span>Air GamePad Classic</span>
               <span>•</span>
-              <span className="text-[#58a6ff]">{gameMode === '1P' ? `vs AI Bot (${aiDifficulty})` : '2 Players (Local)'}</span>
+              <span className="text-[#58a6ff]">vs AI Bot</span>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Mode Toggle */}
-          <div className="flex rounded-lg bg-[#161b22] border border-[#30363d] p-0.5">
-            <button
-              onClick={() => {
-                setGameMode('1P');
-                resetGame();
-              }}
-              className={`px-2.5 py-1 text-xs font-mono-code rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
-                gameMode === '1P' ? 'bg-[#58a6ff] text-[#0d1117] font-bold' : 'text-[#8b949e] hover:text-[#ffffff]'
-              }`}
-            >
-              <Bot className="w-3.5 h-3.5" />
-              <span>vs Bot</span>
-            </button>
-            <button
-              onClick={() => {
-                setGameMode('2P');
-                resetGame();
-              }}
-              className={`px-2.5 py-1 text-xs font-mono-code rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
-                gameMode === '2P' ? 'bg-[#58a6ff] text-[#0d1117] font-bold' : 'text-[#8b949e] hover:text-[#ffffff]'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>2 Players</span>
-            </button>
-          </div>
 
           <button
             onClick={onExit}
@@ -338,7 +300,7 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
           }`}>
             <div className="text-[10px] text-[#8b949e] flex items-center justify-center gap-1 font-bold">
               <span>PLAYER X</span>
-              {gameMode === '1P' && <span className="text-[#58a6ff]">(You)</span>}
+              <span className="text-[#58a6ff]">(You)</span>
             </div>
             <div className="text-xl font-black text-[#58a6ff]">{scores.x}</div>
           </div>
@@ -355,7 +317,7 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
           }`}>
             <div className="text-[10px] text-[#8b949e] flex items-center justify-center gap-1 font-bold">
               <span>PLAYER O</span>
-              {gameMode === '1P' && <span className="text-[#f85149]">(Bot)</span>}
+              <span className="text-[#f85149]">(Bot)</span>
             </div>
             <div className="text-xl font-black text-[#f85149]">{scores.o}</div>
           </div>
@@ -369,11 +331,13 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
                 <Trophy className="w-4 h-4" />
                 {winResult.winner === 'Draw'
                   ? "Match Tied! Well played."
-                  : `Player (${winResult.winner}) Won the Match! 🎉`}
+                  : winResult.winner === 'X'
+                    ? 'You won the match! 🎉'
+                    : 'The bot won this round!'}
               </span>
             ) : isAiThinking ? (
-              <span className="flex items-center gap-2 text-[#f85149] bg-[#f85149]/10 border border-[#f85149]/30 px-3 py-1.5 rounded-lg animate-pulse font-bold">
-                <Bot className="w-4 h-4 animate-spin" />
+              <span className="flex items-center gap-2 text-[#f85149] bg-[#f85149]/10 border border-[#f85149]/30 px-3 py-1.5 rounded-lg font-bold">
+                <Bot className="w-4 h-4" />
                 <span>AI Bot is calculating move...</span>
               </span>
             ) : (
@@ -381,31 +345,16 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
                 <span className="text-[#8b949e]">Turn:</span>
                 <span className={`font-bold flex items-center gap-1 ${turn === 'X' ? 'text-[#58a6ff]' : 'text-[#f85149]'}`}>
                   <span className="text-sm font-black">{turn}</span>
-                  <span>({gameMode === '1P' ? (turn === 'X' ? 'You' : 'Bot') : `Player ${turn}`})</span>
+                  <span>({turn === 'X' ? 'You' : 'Bot'})</span>
                 </span>
               </span>
             )}
           </div>
 
-          {gameMode === '1P' && !winResult && (
-            <div className="flex items-center gap-1 bg-[#0d1117] border border-[#30363d] rounded-lg p-0.5">
-              {['easy', 'medium', 'master'].map((lvl) => (
-                <button
-                  key={lvl}
-                  onClick={() => setAiDifficulty(lvl)}
-                  className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold cursor-pointer transition-colors ${
-                    aiDifficulty === lvl ? 'bg-[#58a6ff]/20 text-[#58a6ff] border border-[#58a6ff]/40' : 'text-[#8b949e] hover:text-[#c9d1d9]'
-                  }`}
-                >
-                  {lvl}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* 3x3 Interactive Grid */}
-        <div className="grid grid-cols-3 gap-3 w-72 h-72 sm:w-80 sm:h-80 mb-6 relative">
+        <div className="grid grid-cols-3 grid-rows-3 gap-3 w-72 aspect-square sm:w-80 mb-6 relative">
           {board.map((val, idx) => {
             const isCursor = idx === cursor;
             const isWinningCell = winResult && winResult.line && winResult.line.includes(idx);
@@ -414,7 +363,7 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
             let cellClass = "bg-[#0d1117] border-[#30363d] text-[#c9d1d9]";
 
             if (isWinningCell) {
-              cellClass = "bg-[#00ff85]/20 border-[#00ff85] shadow-[0_0_25px_rgba(0,255,133,0.6)] animate-win-pulse";
+              cellClass = "bg-[#00ff85]/20 border-[#00ff85] shadow-[0_0_16px_rgba(0,255,133,0.45)]";
             } else if (isCursor && !winResult) {
               cellClass = "border-2 border-[#58a6ff] bg-[#58a6ff]/10 shadow-[0_0_20px_rgba(88,166,255,0.35)] scale-[1.03]";
             } else {
@@ -429,9 +378,9 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
                 onMouseLeave={() => setHoveredCell(null)}
                 onClick={() => {
                   setCursor(idx);
-                  makeMove(idx, turn);
+                  makeMove(idx, 'X');
                 }}
-                className={`w-full h-full rounded-2xl border flex items-center justify-center font-extrabold text-5xl sm:text-6xl transition-all cursor-pointer relative overflow-hidden group ${cellClass}`}
+                className={`aspect-square w-full rounded-2xl border flex items-center justify-center font-extrabold text-5xl sm:text-6xl transition-all cursor-pointer relative overflow-hidden group ${cellClass}`}
               >
                 {/* Cell coordinate guide number in corner */}
                 <span className="absolute top-1.5 left-2 text-[9px] font-mono-code text-[#30363d] group-hover:text-[#8b949e]">
@@ -440,12 +389,12 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
 
                 {/* Placed Piece with Pop-In Animation */}
                 {val === 'X' && (
-                  <span className="text-[#58a6ff] drop-shadow-[0_0_12px_rgba(88,166,255,0.6)] animate-pop-in">
+                  <span className="text-[#58a6ff]">
                     ✕
                   </span>
                 )}
                 {val === 'O' && (
-                  <span className="text-[#f85149] drop-shadow-[0_0_12px_rgba(248,81,73,0.6)] animate-pop-in">
+                  <span className="text-[#f85149]">
                     ◯
                   </span>
                 )}
@@ -460,6 +409,8 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
             );
           })}
         </div>
+
+        {winResult && <EndGameActions selected={endChoice} onPlayAgain={resetGame} onExit={onExit} />}
 
         {/* Action Controls & Hint Footer */}
         <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-[#30363d]/60 text-xs font-mono-code text-[#8b949e]">

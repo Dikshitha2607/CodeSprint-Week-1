@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Upload, FileText, CheckCircle2, XCircle, Clock, AlertTriangle, RotateCcw, ArrowRight, Award, Sparkles, HelpCircle, Loader2 } from 'lucide-react';
 import { playSound } from '../utils/audio';
+import EndGameActions from './EndGameActions';
+import { BACKEND_URL } from '../config';
 
 const DEMO_PRESETS = {
   networking: [
@@ -37,102 +39,25 @@ const DEMO_PRESETS = {
   ]
 };
 
-// Client-side 5-question synthesizer from uploaded text
-function generateQuestionsFromText(text, fileName) {
-  const cleanName = fileName.replace(/\.[^/.]+$/, "");
-  
-  // Try parsing JSON first
+function readQuizFile(text) {
   try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed) && parsed.length >= 5 && parsed[0].question && parsed[0].options) {
-      return parsed.slice(0, 5).map((q) => ({
-        question: String(q.question),
-        options: Array.isArray(q.options) ? q.options.slice(0, 4) : ["A", "B", "C", "D"],
-        answer: typeof q.answer === 'number' ? q.answer : 0,
-        explanation: q.explanation || "Extracted directly from uploaded JSON questions."
-      }));
-    }
+    const parsed = typeof text === 'string' ? JSON.parse(text) : text;
+    const items = Array.isArray(parsed) ? parsed : parsed.questions;
+    if (!Array.isArray(items) || !items.length) return null;
+
+    const questions = items.map((item) => ({
+      question: String(item.question || '').trim(),
+      options: Array.isArray(item.options) ? item.options.map(String).slice(0, 4) : [],
+      answer: Number(item.answer),
+      explanation: String(item.explanation || '')
+    }));
+
+    return questions.every((q) => q.question && q.options.length === 4 && Number.isInteger(q.answer) && q.answer >= 0 && q.answer < 4)
+      ? questions
+      : null;
   } catch {
-    // Not a direct JSON quiz array, proceed with smart text extraction
+    return null;
   }
-
-  // Extract meaningful non-empty lines and words
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 20 && !l.startsWith('//') && !l.startsWith('/*'));
-
-  const words = text
-    .replace(/[^\w\s]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length > 4 && !/^\d+$/.test(w));
-
-  const uniqueWords = Array.from(new Set(words));
-  const sampleKeyTerms = uniqueWords.slice(0, 15);
-
-  const keyTerm1 = sampleKeyTerms[0] || 'Architecture';
-  const keyTerm2 = sampleKeyTerms[1] || 'Configuration';
-  const keyTerm3 = sampleKeyTerms[2] || 'Interface';
-  const keyTerm4 = sampleKeyTerms[3] || 'Optimization';
-  const keyTerm5 = sampleKeyTerms[4] || 'Execution';
-
-  return [
-    {
-      question: `According to ${fileName}, what primary concept is emphasized in relation to "${keyTerm1}"?`,
-      options: [
-        `High-throughput modular workflow based on ${keyTerm1}`,
-        `Static legacy single-threaded process`,
-        `Unencrypted unbuffered transmission mode`,
-        `Manual off-line backup script`
-      ],
-      answer: 0,
-      explanation: `Document context highlights ${keyTerm1} as the primary modular design element.`
-    },
-    {
-      question: `Which configuration parameter or component governs "${keyTerm2}" in ${cleanName}?`,
-      options: [
-        `Default unmanaged global environment`,
-        `Targeted parameter tuning for ${keyTerm2}`,
-        `Deprecated legacy fallback profile`,
-        `External unauthenticated client proxy`
-      ],
-      answer: 1,
-      explanation: `Targeted parameter tuning for ${keyTerm2} is specified in the uploaded file structure.`
-    },
-    {
-      question: `What functional role is associated with "${keyTerm3}" in the document workflow?`,
-      options: [
-        `Periodic cache purge daemon`,
-        `Random seed generator`,
-        `Standardized protocol communication for ${keyTerm3}`,
-        `Static documentation disclaimer`
-      ],
-      answer: 2,
-      explanation: `${keyTerm3} establishes standardized communication boundaries in this specification.`
-    },
-    {
-      question: `What operational benefit is achieved by applying "${keyTerm4}" in ${fileName}?`,
-      options: [
-        `Increased computational overhead`,
-        `Reduced latency and streamlined ${keyTerm4}`,
-        `Forced blocking thread sleep cycles`,
-        `Extended cold-start boot sequence`
-      ],
-      answer: 1,
-      explanation: `Implementing ${keyTerm4} reduces latency and provides cleaner resource allocation.`
-    },
-    {
-      question: `What is the expected outcome of the "${keyTerm5}" lifecycle step in ${cleanName}?`,
-      options: [
-        `System crash and memory dump`,
-        `Indefinite background process loop`,
-        `Unconditional connection reset`,
-        `Successful execution validation and state synchronization`
-      ],
-      answer: 3,
-      explanation: `The ${keyTerm5} step concludes with validation and synchronous state delivery.`
-    }
-  ];
 }
 
 export default function QuizGame({ remoteAction, isPaused, restartCounter, onExit }) {
@@ -140,6 +65,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
   const [gameState, setGameState] = useState('UPLOAD');
   const [uploadedFile, setUploadedFile] = useState(null);
   const [isReadingFile, setIsReadingFile] = useState(false);
+  const [fileError, setFileError] = useState('');
   const [questions, setQuestions] = useState(DEMO_PRESETS.networking);
 
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -149,6 +75,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
   const [feedback, setFeedback] = useState(null); // null | { isCorrect: boolean, chosen: number, correct: number, timedOut: boolean }
   const [timeLeft, setTimeLeft] = useState(45); // 45 seconds countdown timer
   const [userAnswers, setUserAnswers] = useState([]); // [{ qIdx, chosen, correct, isCorrect }]
+  const [endChoice, setEndChoice] = useState(0);
 
   const lastHandledTimeRef = useRef(0);
   const timerRef = useRef(null);
@@ -262,20 +189,34 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
 
     setUploadedFile(file);
     setIsReadingFile(true);
+    setFileError('');
 
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result || '';
-      const generated = generateQuestionsFromText(String(content), file.name);
-      setQuestions(generated);
-      setIsReadingFile(false);
+    reader.onload = async (event) => {
+      try {
+        const bytes = new Uint8Array(event.target?.result || new ArrayBuffer(0));
+        let binary = '';
+        bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+        const response = await fetch(`${BACKEND_URL}/api/quiz/generate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: file.name, fileData: btoa(binary) })
+        });
+        const data = await response.json();
+        const parsedQuestions = readQuizFile(data);
+        if (!response.ok || !parsedQuestions) throw new Error(data.error || 'The generated quiz was invalid.');
+        setQuestions(parsedQuestions);
+      } catch (error) {
+        setUploadedFile(null);
+        setFileError(error.message || 'Quiz generation failed.');
+      } finally { setIsReadingFile(false); }
     };
     reader.onerror = () => {
       setIsReadingFile(false);
+      setUploadedFile(null);
+      setFileError('The file could not be read. Please choose a JSON quiz file.');
     };
 
-    // Read file text
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   };
 
   // Start Quiz
@@ -294,6 +235,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
   const resetQuiz = () => {
     setGameState('UPLOAD');
     setUploadedFile(null);
+    setFileError('');
     setQuestions(DEMO_PRESETS.networking);
     setCurrentIdx(0);
     setScore(0);
@@ -313,16 +255,15 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
     lastHandledTimeRef.current = timestamp || Date.now();
 
     if (gameState === 'UPLOAD') {
-      if (action === 'ACTION_A' || action === 'START' || action === 'UP' || action === 'DOWN') {
+      if (uploadedFile && (action === 'ACTION_A' || action === 'START')) {
         startQuiz();
       }
       return;
     }
 
     if (gameState === 'COMPLETED') {
-      if (action === 'ACTION_A' || action === 'START' || action === 'UP' || action === 'DOWN') {
-        resetQuiz();
-      }
+      if (action === 'LEFT' || action === 'RIGHT') setEndChoice((choice) => choice === 0 ? 1 : 0);
+      else if (action === 'ACTION_A' || action === 'START') endChoice === 0 ? startQuiz() : onExit();
       return;
     }
 
@@ -353,7 +294,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
       if (isPaused) return;
 
       if (gameState === 'UPLOAD') {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (uploadedFile && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault();
           startQuiz();
         }
@@ -361,10 +302,8 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
       }
 
       if (gameState === 'COMPLETED') {
-        if (e.key === 'Enter' || e.key === ' ' || e.key === 'r' || e.key === 'R') {
-          e.preventDefault();
-          resetQuiz();
-        }
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setEndChoice((choice) => choice === 0 ? 1 : 0); }
+        else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); endChoice === 0 ? startQuiz() : onExit(); }
         return;
       }
 
@@ -401,7 +340,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPaused, gameState, selectedOpt, cursor]);
+  }, [isPaused, gameState, selectedOpt, cursor, endChoice, onExit]);
 
   const currentQ = questions[currentIdx] || questions[0];
 
@@ -442,9 +381,9 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
             </div>
 
             <div>
-              <h3 className="text-2xl font-extrabold text-[#ffffff] mb-1.5">Upload File to Generate Quiz</h3>
+              <h3 className="text-2xl font-extrabold text-[#ffffff] mb-1.5">Upload Your Quiz File</h3>
               <p className="text-xs text-[#8b949e] max-w-md mx-auto">
-                Upload any document (.txt, .md, .json, .csv, .pdf, .docx) from your PC to generate 5 custom questions with a 45-second timer.
+                Upload a PDF, DOCX, TXT, Markdown, CSV, or JSON file. The RAG service creates questions grounded in its content.
               </p>
             </div>
 
@@ -453,7 +392,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
               <input
                 type="file"
                 id="quiz-upload-input"
-                accept=".txt,.md,.json,.csv,.pdf,.docx,.doc,.js,.html,.ts"
+                accept=".pdf,.docx,.txt,.md,.csv,.json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*"
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -463,42 +402,27 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
                   {uploadedFile ? uploadedFile.name : 'Click to Browse File from PC'}
                 </span>
                 <span className="text-[10px] font-mono-code text-[#8b949e]">
-                  {uploadedFile ? `${(uploadedFile.size / 1024).toFixed(1)} KB • Ready` : 'Supports TXT, MD, JSON, CSV, PDF, DOCX'}
+                  {uploadedFile ? `${questions.length} questions ready` : 'PDF, DOCX, TXT, MD, CSV, or JSON'}
                 </span>
               </label>
 
               {isReadingFile && (
                 <div className="flex items-center gap-2 text-xs font-mono-code text-[#00ff85] mt-2 animate-pulse">
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Synthesizing 5 questions from content...</span>
+                  <span>Creating a quiz from your file...</span>
                 </div>
               )}
+              {fileError && <p className="text-[11px] text-[#f85149] text-center">{fileError}</p>}
             </div>
 
-            {/* Quick Demo Options */}
-            <div className="w-full max-w-md pt-2">
-              <div className="flex items-center gap-2 text-[11px] font-mono-code text-[#8b949e] mb-2 justify-center">
-                <span>Or load quick demo topic:</span>
-              </div>
-              <button
-                onClick={() => {
-                  setUploadedFile(null);
-                  setQuestions(DEMO_PRESETS.networking);
-                  startQuiz();
-                }}
-                className="px-3.5 py-1.5 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#58a6ff] text-xs font-mono-code text-[#c9d1d9] hover:text-[#58a6ff] transition-all cursor-pointer"
-              >
-                🎮 WebSockets & Game Controllers (Default)
-              </button>
-            </div>
 
             {/* Start Button */}
             <button
               onClick={startQuiz}
-              disabled={isReadingFile}
-              className="w-full max-w-md py-3.5 px-6 bg-[#58a6ff] hover:bg-[#58a6ff]/90 text-[#0d1117] font-extrabold rounded-xl shadow-[0_0_20px_rgba(88,166,255,0.3)] transition-all cursor-pointer flex items-center justify-center gap-2 text-sm"
+              disabled={isReadingFile || !uploadedFile}
+              className="w-full max-w-md py-3.5 px-6 bg-[#58a6ff] hover:bg-[#58a6ff]/90 disabled:bg-[#30363d] disabled:text-[#8b949e] disabled:cursor-not-allowed text-[#0d1117] font-extrabold rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2 text-sm"
             >
-              <span>{uploadedFile ? 'Start 5-Question Quiz from File' : 'Start 5-Question Quiz'}</span>
+              <span>{uploadedFile ? `Start ${questions.length}-Question Quiz` : 'Upload a Quiz File to Start'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -512,7 +436,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
               <div className="flex justify-between items-center text-xs font-mono-code">
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-1 rounded bg-[#0d1117] border border-[#30363d] text-[#58a6ff] font-bold">
-                    QUESTION {currentIdx + 1} OF 5
+                    QUESTION {currentIdx + 1} OF {questions.length}
                   </span>
                   <span className="text-[#8b949e]">Score: {score} pts</span>
                 </div>
@@ -741,24 +665,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
               </div>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md pt-2">
-              <button
-                onClick={startQuiz}
-                className="flex-1 py-3 px-4 bg-[#58a6ff] hover:bg-[#58a6ff]/90 text-[#0d1117] font-extrabold rounded-xl transition-all cursor-pointer text-xs sm:text-sm flex items-center justify-center gap-2"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Retake Quiz</span>
-              </button>
-
-              <button
-                onClick={resetQuiz}
-                className="flex-1 py-3 px-4 bg-[#21262d] hover:bg-[#30363d] text-[#ffffff] font-bold rounded-xl border border-[#30363d] hover:border-[#58a6ff] transition-all cursor-pointer text-xs sm:text-sm flex items-center justify-center gap-2"
-              >
-                <Upload className="w-4 h-4" />
-                <span>Upload New File</span>
-              </button>
-            </div>
+            <EndGameActions selected={endChoice} onPlayAgain={startQuiz} onExit={onExit} />
           </div>
         )}
       </div>

@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { QRCodeSVG } from 'qrcode.react';
+import QuizGameScreen from './components/QuizGame.jsx';
+import TicTacToeGameScreen from './components/TicTacToeGame.jsx';
+import Connect4GameScreen from './components/Connect4Game.jsx';
+import EndGameActions from './components/EndGameActions.jsx';
+import { BACKEND_URL } from './config.js';
 import {
   Gamepad2,
   Wifi,
@@ -36,14 +41,6 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
-// Connect to Socket.IO backend server (Render deployment URL vs Localhost fallback)
-const socketHost = typeof window !== 'undefined' ? (window.location.hostname || 'localhost') : 'localhost';
-export const BACKEND_URL = typeof window !== 'undefined'
-  ? (window.location.hostname.endsWith('onrender.com')
-      ? 'https://air-gamepad-backend.onrender.com'
-      : (window.location.port === '5173' ? `http://${socketHost}:3000` : window.location.origin))
-  : 'https://air-gamepad-backend.onrender.com';
-
 const socket = io(BACKEND_URL, {
   autoConnect: true,
   transports: ['websocket', 'polling']
@@ -57,6 +54,7 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
   const [score, setScore] = useState(0);
   const [aiDifficulty, setAiDifficulty] = useState(0.7);
   const [gameOver, setGameOver] = useState(false);
+  const [endChoice, setEndChoice] = useState(0);
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -68,9 +66,8 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
     if (!remoteAction || isPaused) return;
     const { action } = remoteAction;
     if (gameOver) {
-      if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START' || action === 'UP' || action === 'DOWN') {
-        resetGame();
-      }
+      if (action === 'LEFT' || action === 'RIGHT') setEndChoice((choice) => choice === 0 ? 1 : 0);
+      else if (action === 'ACTION_A' || action === 'START') endChoice === 0 ? resetGame() : onExit();
       return;
     }
     if (action === 'UP' || action === 'LEFT' || action === 'ACTION_A') {
@@ -78,17 +75,20 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
     } else if (action === 'DOWN' || action === 'RIGHT' || action === 'ACTION_B') {
       setPaddleY((prev) => Math.min(90, prev + 12));
     }
-  }, [remoteAction, isPaused, gameOver]);
+  }, [remoteAction, isPaused, gameOver, endChoice, onExit]);
 
   useEffect(() => {
     const handleKey = (e) => {
       if (isPaused) return;
-      if (e.key === 'ArrowUp') setPaddleY((prev) => Math.max(10, prev - 12));
-      if (e.key === 'ArrowDown') setPaddleY((prev) => Math.min(90, prev + 12));
+      if (gameOver) {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') setEndChoice((choice) => choice === 0 ? 1 : 0);
+        else if (e.key === 'Enter' || e.key === ' ') endChoice === 0 ? resetGame() : onExit();
+      } else if (e.key === 'ArrowUp') setPaddleY((prev) => Math.max(10, prev - 12));
+      else if (e.key === 'ArrowDown') setPaddleY((prev) => Math.min(90, prev + 12));
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [isPaused]);
+  }, [isPaused, gameOver, endChoice, onExit]);
 
   useEffect(() => {
     if (gameOver || isPaused) return;
@@ -106,8 +106,9 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
 
         if (newX <= 8) {
           if (Math.abs(newY - paddleY) <= 18) {
-            newVx = Math.abs(prev.vx) * 1.05;
+            newVx = Math.min(3.4, Math.abs(prev.vx) * 1.04);
             newX = 8;
+            newVy = clamp(prev.vy + (newY - paddleY) * 0.11 + (Math.random() - 0.5) * 1.1, -3.6, 3.6);
             setScore((s) => s + 1);
           } else {
             setGameOver(true);
@@ -116,9 +117,9 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
 
         if (newX >= 92) {
           if (Math.abs(newY - aiPaddleY) <= 18) {
-            newVx = -Math.abs(prev.vx) * 1.05;
+            newVx = -Math.min(3.4, Math.abs(prev.vx) * 1.04);
             newX = 92;
-            newVy += (newY - aiPaddleY) * 0.12;
+            newVy = clamp(prev.vy + (newY - aiPaddleY) * 0.12 + (Math.random() - 0.5) * 1.6, -3.8, 3.8);
           } else {
             setGameOver(true);
           }
@@ -134,10 +135,11 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
   useEffect(() => {
     if (gameOver || isPaused) return;
 
-    const aiSpeed = 0.8 + aiDifficulty * 1.35;
-    const trackingBias = Math.max(0, 16 - aiDifficulty * 8);
+    const aiSpeed = 0.7 + aiDifficulty * 1.1;
+    const trackingBias = Math.max(3, 18 - aiDifficulty * 7);
     const predictedY = ball.y + ball.vy * (2.5 + aiDifficulty * 2.5);
-    const targetY = clamp(predictedY + (ball.vy >= 0 ? trackingBias * 0.2 : -trackingBias * 0.2), 10, 90);
+    const variation = Math.sin(ball.x * 0.42 + ball.y * 0.07) * trackingBias * 0.55;
+    const targetY = clamp(predictedY + variation + (ball.vy >= 0 ? trackingBias * 0.15 : -trackingBias * 0.15), 10, 90);
 
     setAiPaddleY((prev) => {
       const diff = targetY - prev;
@@ -150,7 +152,7 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
   }, [ball, aiDifficulty, gameOver, isPaused]);
 
   useEffect(() => {
-    setAiDifficulty(Math.min(2.1, 0.7 + score * 0.08));
+    setAiDifficulty(Math.min(1.7, 0.55 + score * 0.06));
   }, [score]);
 
   const resetGame = () => {
@@ -158,8 +160,9 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
     setScore(0);
     setPaddleY(50);
     setAiPaddleY(50);
-    setAiDifficulty(0.7);
+    setAiDifficulty(0.55);
     setGameOver(false);
+    setEndChoice(0);
   };
 
   return (
@@ -192,9 +195,7 @@ function PingPongGame({ remoteAction, isPaused, restartCounter, onExit }) {
           <div className="absolute inset-0 bg-[#0d1117]/90 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
             <h3 className="text-3xl font-extrabold text-[#f85149]">Game Over!</h3>
             <p className="text-sm font-mono-code text-[#8b949e]">Final Rally Score: {score}</p>
-            <button onClick={resetGame} className="px-6 py-3 bg-[#58a6ff] text-[#0d1117] font-bold rounded-xl shadow-lg hover:scale-105 transition-transform cursor-pointer">
-              Play Again
-            </button>
+            <EndGameActions selected={endChoice} onPlayAgain={resetGame} onExit={onExit} />
           </div>
         )}
       </div>
@@ -1199,6 +1200,7 @@ function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
   });
   const [winProb, setWinProb] = useState('98.5');
   const [gameOver, setGameOver] = useState(false);
+  const [endChoice, setEndChoice] = useState(0);
 
   // ML Trajectory Prediction & Ultra-Wide Adaptive Win-Probability Generator
   const predictMLOptimalPipe = (birdY, velocity, currentScore) => {
@@ -1257,6 +1259,7 @@ function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
     setScore(0);
     setWinProb(initialPipe1.prob);
     setGameOver(false);
+    setEndChoice(0);
   };
 
   const flap = () => {
@@ -1290,8 +1293,13 @@ function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
 
   useEffect(() => {
     if (!remoteAction || isPaused) return;
+    if (gameOver) {
+      if (remoteAction.action === 'LEFT' || remoteAction.action === 'RIGHT') setEndChoice((choice) => choice === 0 ? 1 : 0);
+      else if (remoteAction.action === 'ACTION_A' || remoteAction.action === 'START') endChoice === 0 ? resetGame() : onExit();
+      return;
+    }
     flap();
-  }, [remoteAction, isPaused]);
+  }, [remoteAction, isPaused, gameOver, endChoice, onExit]);
 
   // Main Canvas Game Loop (60 FPS rAF)
   useEffect(() => {
@@ -1582,15 +1590,7 @@ function FlappyBirdGame({ remoteAction, isPaused, restartCounter, onExit }) {
               <div>Pipes Passed: <span className="text-[#00ff85] font-bold text-lg">{score}</span></div>
               <div>High Score: <span className="text-[#ffd700] font-bold text-lg">{highScore}</span></div>
             </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                resetGame();
-              }}
-              className="mt-2 px-8 py-3.5 bg-[#58a6ff] text-[#0d1117] font-extrabold rounded-xl shadow-[0_0_25px_rgba(88,166,255,0.4)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
-            >
-              Play Again
-            </button>
+            <div onClick={(e) => e.stopPropagation()}><EndGameActions selected={endChoice} onPlayAgain={resetGame} onExit={onExit} /></div>
           </div>
         )}
       </div>
@@ -1621,6 +1621,7 @@ export default function App() {
 
   // Server LAN IP configuration
   const [serverIp, setServerIp] = useState('');
+  const [serverPort, setServerPort] = useState('3000');
 
   // Modal states
   const [activeModal, setActiveModal] = useState(null); // 'host' | 'join' | null
@@ -1640,6 +1641,9 @@ export default function App() {
         if (data && data.localIp) {
           setServerIp(data.localIp);
         }
+        if (data && data.port) {
+          setServerPort(String(data.port));
+        }
       })
       .catch((err) => console.log('[Network] Server config check:', err));
   }, []);
@@ -1654,6 +1658,7 @@ export default function App() {
   const [restartCounter, setRestartCounter] = useState(0);
   const [remoteEvent, setRemoteEvent] = useState(null);
   const [lastMobileAction, setLastMobileAction] = useState(null);
+  const [activeMobileButton, setActiveMobileButton] = useState(null);
   const [playerName, setPlayerName] = useState(typeof window !== 'undefined' ? (localStorage.getItem('air_player_name') || '') : '');
   const [nameInputValue, setNameInputValue] = useState(typeof window !== 'undefined' ? (localStorage.getItem('air_player_name') || '') : '');
   const [isEditingName, setIsEditingName] = useState(false);
@@ -1699,7 +1704,6 @@ export default function App() {
 
   // Live Canvas Pong Arena State & Physics (Automated Endless Rally)
   const canvasRef = useRef(null);
-  const [gameStats, setGameStats] = useState({ speed: 184, pingP1: 11, pingP2: 14 });
   const [p1ActiveBtn, setP1ActiveBtn] = useState(null);
   const [p2ActiveBtn, setP2ActiveBtn] = useState(null);
 
@@ -1955,6 +1959,7 @@ export default function App() {
   // Handle Mobile Touch Input Emission
   const handleSendMobileInput = (action) => {
     setLastMobileAction(action);
+    setActiveMobileButton(action);
     const urlParams = new URLSearchParams(window.location.search);
     const codeParam = urlParams.get('code');
     const targetCode = (roomCode || roomState.code || codeParam || '').toUpperCase();
@@ -1966,6 +1971,7 @@ export default function App() {
       });
     }
     setTimeout(() => setLastMobileAction(null), 300);
+    setTimeout(() => setActiveMobileButton(null), 160);
   };
 
   // Handle Controller Disconnect & Leave Room
@@ -1995,25 +2001,32 @@ export default function App() {
     }, 1200);
   };
 
-  // Helper to build Controller Join URL (Render deployment vs Local LAN IPv4)
+  // Helper to build Controller Join URL. For local development this must use
+  // the address reported by the backend, never localhost or Vite's port.
   const getControllerUrl = () => {
     const code = roomState.code || roomCode || '';
     if (typeof window !== 'undefined') {
-      const { hostname, origin, port } = window.location;
-      if (hostname.endsWith('onrender.com') || (hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.match(/^\d+\.\d+\.\d+\.\d+$/))) {
-        const targetHost = hostname.endsWith('onrender.com') ? 'https://air-gamepad.onrender.com' : origin;
-        return `${targetHost}/?code=${code}`;
+      const { hostname, origin } = window.location;
+      if (hostname.endsWith('onrender.com')) {
+        return `https://air-gamepad.onrender.com/?code=${code}`;
       }
-      const hostIp = serverIp || hostname || '127.0.0.1';
-      const portStr = port ? `:${port}` : (origin.includes(':') ? '' : ':3000');
-      return `http://${hostIp}${portStr}/?code=${code}`;
+      if (serverIp) {
+        return `http://${serverIp}:${serverPort}/?code=${code}`;
+      }
+      // If the app was already opened directly through a LAN IP, it is safe to
+      // retain that address. Do not ever emit localhost into a mobile QR code.
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+        return `${origin}/?code=${code}`;
+      }
+      return '';
     }
-    return `/?code=${code}`;
+    return '';
   };
 
   // Copy Link Handler
   const handleCopyLink = () => {
     const inviteUrl = getControllerUrl();
+    if (!inviteUrl) return;
     navigator.clipboard.writeText(inviteUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
@@ -2159,20 +2172,20 @@ export default function App() {
 
   const faqData = [
     {
-      q: "01. How do players join a room?",
-      a: "Players simply scan the QR code displayed on the host screen using their phone's camera, or type in the 4-digit room code. The controller channel initializes automatically in under 1 second without downloading any app."
+      q: "01. How do I connect my phone?",
+      a: "Start the backend with node server.js and the frontend with npm run dev. Keep your phone and computer on the same Wi-Fi, then scan the QR code. It uses your computer's Wi-Fi IP address and port 3000."
     },
     {
-      q: "02. Do both phones need to be on the same Wi-Fi network?",
-      a: "Staying on the same local Wi-Fi router delivers ultra-fast low-latency performance for instant responsive multiplayer gameplay."
+      q: "02. Why does the QR code not open on my phone?",
+      a: "Confirm both devices are on the same Wi-Fi, allow port 3000 through the computer firewall, and restart node server.js after changing the network. Do not use localhost on your phone."
     },
     {
-      q: "03. Are controller haptics and motion sensors supported?",
-      a: "Yes! Modern web features allow us to trigger physical device vibration motors for tactile feedback as well as motion-assisted controls."
+      q: "03. How do I play the bot games?",
+      a: "Use the mobile D-pad to move the highlighted Tic Tac Toe cell or Connect 4 column. Press the centre OK button to place your move. Both games are single-player against the AI bot."
     },
     {
-      q: "04. Is any dongle, app, or extra hardware needed?",
-      a: "Zero hardware dongles, USB adapters, or native mobile installations are needed. Any modern web browser running on a Smart TV, laptop, or desktop acts as the display host."
+      q: "04. What files can I use for the quiz?",
+      a: "Upload PDF, DOCX, TXT, Markdown, CSV, or JSON. The server extracts the text and generates a five-question quiz from the uploaded material. The RAG setup also needs its Python dependencies and a GROQ_API_KEY."
     }
   ];
 
@@ -2319,7 +2332,7 @@ export default function App() {
               <div className="col-start-2 row-start-1 flex justify-center">
                 <button
                   onClick={() => handleSendMobileInput('UP')}
-                  className="w-13 h-13 sm:w-16 sm:h-16 rounded-xl bg-[#0d1117] border-2 border-[#30363d] active:border-[#58a6ff] active:bg-[#58a6ff]/25 text-[#58a6ff] flex items-center justify-center font-black text-lg shadow-lg active:scale-90 transition-all cursor-pointer"
+                  className={`w-13 h-13 sm:w-16 sm:h-16 rounded-xl border-2 text-[#58a6ff] flex items-center justify-center font-black text-lg shadow-lg transition-all duration-150 cursor-pointer ${activeMobileButton === 'UP' ? 'bg-[#58a6ff]/35 border-[#58a6ff] scale-90 shadow-[0_0_18px_rgba(88,166,255,0.65)]' : 'bg-[#0d1117] border-[#30363d]'}`}
                 >
                   ▲
                 </button>
@@ -2329,7 +2342,7 @@ export default function App() {
               <div className="col-start-1 row-start-2 flex justify-center">
                 <button
                   onClick={() => handleSendMobileInput('LEFT')}
-                  className="w-13 h-13 sm:w-16 sm:h-16 rounded-xl bg-[#0d1117] border-2 border-[#30363d] active:border-[#58a6ff] active:bg-[#58a6ff]/25 text-[#58a6ff] flex items-center justify-center font-black text-lg shadow-lg active:scale-90 transition-all cursor-pointer"
+                  className={`w-13 h-13 sm:w-16 sm:h-16 rounded-xl border-2 text-[#58a6ff] flex items-center justify-center font-black text-lg shadow-lg transition-all duration-150 cursor-pointer ${activeMobileButton === 'LEFT' ? 'bg-[#58a6ff]/35 border-[#58a6ff] scale-90 shadow-[0_0_18px_rgba(88,166,255,0.65)]' : 'bg-[#0d1117] border-[#30363d]'}`}
                 >
                   ◄
                 </button>
@@ -2349,7 +2362,7 @@ export default function App() {
               <div className="col-start-3 row-start-2 flex justify-center">
                 <button
                   onClick={() => handleSendMobileInput('RIGHT')}
-                  className="w-13 h-13 sm:w-16 sm:h-16 rounded-xl bg-[#0d1117] border-2 border-[#30363d] active:border-[#58a6ff] active:bg-[#58a6ff]/25 text-[#58a6ff] flex items-center justify-center font-black text-lg shadow-lg active:scale-90 transition-all cursor-pointer"
+                  className={`w-13 h-13 sm:w-16 sm:h-16 rounded-xl border-2 text-[#58a6ff] flex items-center justify-center font-black text-lg shadow-lg transition-all duration-150 cursor-pointer ${activeMobileButton === 'RIGHT' ? 'bg-[#58a6ff]/35 border-[#58a6ff] scale-90 shadow-[0_0_18px_rgba(88,166,255,0.65)]' : 'bg-[#0d1117] border-[#30363d]'}`}
                 >
                   ►
                 </button>
@@ -2359,7 +2372,7 @@ export default function App() {
               <div className="col-start-2 row-start-3 flex justify-center">
                 <button
                   onClick={() => handleSendMobileInput('DOWN')}
-                  className="w-13 h-13 sm:w-16 sm:h-16 rounded-xl bg-[#0d1117] border-2 border-[#30363d] active:border-[#58a6ff] active:bg-[#58a6ff]/25 text-[#58a6ff] flex items-center justify-center font-black text-lg shadow-lg active:scale-90 transition-all cursor-pointer"
+                  className={`w-13 h-13 sm:w-16 sm:h-16 rounded-xl border-2 text-[#58a6ff] flex items-center justify-center font-black text-lg shadow-lg transition-all duration-150 cursor-pointer ${activeMobileButton === 'DOWN' ? 'bg-[#58a6ff]/35 border-[#58a6ff] scale-90 shadow-[0_0_18px_rgba(88,166,255,0.65)]' : 'bg-[#0d1117] border-[#30363d]'}`}
                 >
                   ▼
                 </button>
@@ -2367,21 +2380,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Secondary Action Buttons (B & Start) */}
-          <div className="flex items-center justify-center gap-4 w-full pt-1.5 border-t border-[#30363d]/60 shrink-0">
-            <button
-              onClick={() => handleSendMobileInput('ACTION_B')}
-              className="w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-[#0d1117] border-2 border-[#30363d] active:border-[#00ff85] active:text-[#00ff85] text-[#c9d1d9] font-mono-code font-extrabold text-sm flex items-center justify-center shadow-inner active:scale-90 transition-all cursor-pointer"
-            >
-              B
-            </button>
-            <button
-              onClick={() => handleSendMobileInput('START')}
-              className="px-4 py-1.5 rounded-full bg-[#0d1117] border border-[#30363d] active:border-[#58a6ff] text-[#8b949e] active:text-[#ffffff] font-mono-code text-[11px] font-bold shadow-inner active:scale-90 transition-all cursor-pointer"
-            >
-              START
-            </button>
-          </div>
         </div>
 
         {/* Compact Footer Disconnect Option */}
@@ -2444,7 +2442,9 @@ export default function App() {
             <span>Air Game Pad</span>
           </h1>
           <p className="text-sm text-[#8b949e] text-center mb-6">
-            Scan the QR code with your phone camera or visit <span className="text-[#c9d1d9] font-mono-code">{getControllerUrl()}</span>
+            {getControllerUrl()
+              ? <>Scan the QR code with your phone camera or visit <span className="text-[#c9d1d9] font-mono-code">{getControllerUrl()}</span></>
+              : 'Detecting your local network address…'}
           </p>
 
           {/* ROOM ACCESS KEY CARD CONTAINER */}
@@ -2491,7 +2491,7 @@ export default function App() {
                 <Loader2 className="w-10 h-10 text-[#58a6ff] animate-spin mb-3 z-10" />
                 <span className="text-[11px] font-mono-code text-[#8b949e] z-10 tracking-wide">GENERATING QR CODE...</span>
               </div>
-            ) : (
+            ) : getControllerUrl() ? (
               <div className="bg-[#ffffff] p-4 sm:p-5 rounded-2xl mb-6 shadow-2xl flex flex-col items-center justify-center border-2 border-[#58a6ff]/40 hover:border-[#58a6ff] transition-all">
                 <QRCodeSVG
                   value={getControllerUrl()}
@@ -2501,6 +2501,11 @@ export default function App() {
                   level={"H"}
                   includeMargin={false}
                 />
+              </div>
+            ) : (
+              <div className="bg-[#0d1117] border border-[#30363d] rounded-2xl p-6 mb-6 flex flex-col items-center justify-center w-52 h-52 sm:w-60 sm:h-60 text-center">
+                <Wifi className="w-8 h-8 text-[#58a6ff] mb-3" />
+                <span className="text-[11px] font-mono-code text-[#8b949e]">Waiting for local IP address…</span>
               </div>
             )}
 
@@ -2514,13 +2519,14 @@ export default function App() {
               <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center">
                 <button
                   onClick={handleCopyLink}
-                  className="px-4 py-2.5 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#58a6ff] text-xs font-mono-code text-[#c9d1d9] flex items-center gap-2 transition-all cursor-pointer"
+                  disabled={!getControllerUrl()}
+                  className="px-4 py-2.5 rounded-lg bg-[#0d1117] border border-[#30363d] hover:border-[#58a6ff] disabled:opacity-50 disabled:cursor-not-allowed text-xs font-mono-code text-[#c9d1d9] flex items-center gap-2 transition-all cursor-pointer"
                 >
                   {copiedLink ? <Check className="w-4 h-4 text-[#00ff85]" /> : <Copy className="w-4 h-4 text-[#58a6ff]" />}
                   <span>{copiedLink ? 'Copied!' : 'Copy Invite Link'}</span>
                 </button>
                 <span className="text-xs font-mono-code text-[#8b949e]">
-                  {getControllerUrl()}
+                  {getControllerUrl() || 'Waiting for local IP address…'}
                 </span>
               </div>
             )}
@@ -2907,9 +2913,9 @@ export default function App() {
         {/* Active Game Component Render */}
         <div className="flex-1 flex flex-col justify-center relative">
           {activeGameId === 'pingpong' && <PingPongGame remoteAction={remoteEvent} isPaused={isGamePaused} restartCounter={restartCounter} onExit={() => setCurrentView('arena')} />}
-          {activeGameId === 'quiz' && <QuizGame remoteAction={remoteEvent} isPaused={isGamePaused} restartCounter={restartCounter} onExit={() => setCurrentView('arena')} />}
-          {activeGameId === 'tictactoe' && <TicTacToeGame remoteAction={remoteEvent} isPaused={isGamePaused} restartCounter={restartCounter} onExit={() => setCurrentView('arena')} />}
-          {activeGameId === 'connect4' && <Connect4Game remoteAction={remoteEvent} isPaused={isGamePaused} restartCounter={restartCounter} onExit={() => setCurrentView('arena')} />}
+          {activeGameId === 'quiz' && <QuizGameScreen remoteAction={remoteEvent} isPaused={isGamePaused} restartCounter={restartCounter} onExit={() => setCurrentView('arena')} />}
+          {activeGameId === 'tictactoe' && <TicTacToeGameScreen remoteAction={remoteEvent} isPaused={isGamePaused} restartCounter={restartCounter} onExit={() => setCurrentView('arena')} />}
+          {activeGameId === 'connect4' && <Connect4GameScreen remoteAction={remoteEvent} isPaused={isGamePaused} restartCounter={restartCounter} onExit={() => setCurrentView('arena')} />}
           {activeGameId === 'flappybird' && <FlappyBirdGame remoteAction={remoteEvent} isPaused={isGamePaused} restartCounter={restartCounter} onExit={() => setCurrentView('arena')} />}
 
           {/* GAME PAUSED MODAL OVERLAY */}
@@ -3570,11 +3576,6 @@ export default function App() {
                 className="w-full h-full object-contain"
               />
 
-              <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded bg-[#161b22]/90 border border-[#30363d] text-[11px] font-mono-code text-[#00ff85] flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5" />
-                SPD: {gameStats.speed} MPH
-              </div>
-
               <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded bg-[#161b22]/90 border border-[#30363d] text-[11px] font-mono-code text-[#f85149] flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5" />
                 CONTINUOUS RALLIES
@@ -3600,10 +3601,7 @@ export default function App() {
                   <span className="w-2 h-2 rounded-full bg-[#58a6ff] animate-pulse"></span>
                   ● PLAYER 1
                 </div>
-                <div className="flex items-center gap-3 text-xs font-mono-code text-[#8b949e]">
-                  <span>{gameStats.pingP1}ms PING</span>
-                  <BatteryIcon level={92} color="#58a6ff" />
-                </div>
+                <BatteryIcon level={92} color="#58a6ff" />
               </div>
 
               <div className="bg-[#161b22] rounded-lg p-4 border border-[#30363d]/80 flex flex-col items-center">
@@ -3675,10 +3673,7 @@ export default function App() {
                   <span className="w-2 h-2 rounded-full bg-[#f85149] animate-pulse"></span>
                   ● PLAYER 2
                 </div>
-                <div className="flex items-center gap-3 text-xs font-mono-code text-[#8b949e]">
-                  <span>{gameStats.pingP2}ms PING</span>
-                  <BatteryIcon level={88} color="#f85149" />
-                </div>
+                <BatteryIcon level={88} color="#f85149" />
               </div>
 
               <div className="bg-[#161b22] rounded-lg p-4 border border-[#30363d]/80 flex flex-col items-center">

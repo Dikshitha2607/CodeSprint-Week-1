@@ -6,15 +6,21 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { mkdtemp, writeFile, rm } from 'fs/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const projectPython = path.join(__dirname, 'air_game_pad_venv', 'bin', 'python');
+const pythonCommand = fs.existsSync(projectPython) ? projectPython : 'python3';
 
 const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+const execFileAsync = promisify(execFile);
 
 // Serve static frontend assets built by Vite
 const distPath = path.join(__dirname, 'dist');
@@ -36,6 +42,37 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'Air GamePad Backend', socketIo: 'active' });
 });
 
+// RAG quiz generation: the browser sends an uploaded document as base64 and
+// the collaborator's Python RAG pipeline returns five grounded questions.
+app.post('/api/quiz/generate', async (req, res) => {
+  const { fileName, fileData } = req.body || {};
+  if (!fileName || !fileData) return res.status(400).json({ error: 'A file is required.' });
+  if (typeof fileData !== 'string' || fileData.length > 20 * 1024 * 1024) {
+    return res.status(413).json({ error: 'The file is too large. Please upload a file smaller than 15 MB.' });
+  }
+
+  const safeName = path.basename(String(fileName)).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'air-gamepad-quiz-'));
+  const inputPath = path.join(tempDir, safeName || 'upload.txt');
+  try {
+    await writeFile(inputPath, Buffer.from(String(fileData), 'base64'));
+    const { stdout } = await execFileAsync(pythonCommand, ['quiz.py', '--input', inputPath], {
+      cwd: __dirname,
+      env: process.env,
+      timeout: 120000,
+      maxBuffer: 1024 * 1024
+    });
+    res.json(JSON.parse(stdout));
+  } catch (error) {
+    console.error('Quiz generation failed:', error.stderr || error.message);
+    let message = error.stderr || error.message || 'Quiz generation failed.';
+    try { message = JSON.parse(error.stdout || '').error || message; } catch { /* retain process error */ }
+    res.status(500).json({ error: message.replace(/^Error:\s*/, '') });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -47,15 +84,24 @@ const io = new Server(httpServer, {
 // Helper to detect local network IPv4 address
 function getLocalIpAddress() {
   const interfaces = os.networkInterfaces();
-  for (const devName in interfaces) {
-    const iface = interfaces[devName];
-    for (let i = 0; i < iface.length; i++) {
-      const alias = iface[i];
-      if (alias.family === 'IPv4' && !alias.internal) {
-        return alias.address;
-      }
-    }
-  }
+  const ignoredInterfaces = /^(docker|br-|veth|tailscale|virbr|tun|tap)/i;
+  const entries = Object.entries(interfaces)
+    .filter(([name]) => !ignoredInterfaces.test(name))
+    .flatMap(([name, addresses]) =>
+      (addresses || [])
+        .filter((address) => address.family === 'IPv4' && !address.internal)
+        .map((address) => ({ name, address: address.address }))
+    );
+
+  // Prefer Wi-Fi (wlp/wlan), then Ethernet. This avoids advertising a Docker
+  // bridge or VPN address in the QR code when a phone is on the local Wi-Fi.
+  const wifi = entries.find(({ name }) => /^(wl|wifi)/i.test(name));
+  if (wifi) return wifi.address;
+
+  const ethernet = entries.find(({ name }) => /^(en|eth)/i.test(name));
+  if (ethernet) return ethernet.address;
+
+  if (entries[0]) return entries[0].address;
   return '127.0.0.1';
 }
 

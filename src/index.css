@@ -131,4 +131,12 @@
   animation: winPulse 1.2s infinite ease-in-out;
 }
 
+@keyframes endActionsEnter {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.end-game-actions {
+  animation: endActionsEnter 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
 
