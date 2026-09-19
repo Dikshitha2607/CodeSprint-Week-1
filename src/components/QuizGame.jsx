@@ -262,8 +262,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
     }
 
     if (gameState === 'COMPLETED') {
-      if (action === 'LEFT' || action === 'RIGHT') setEndChoice((choice) => choice === 0 ? 1 : 0);
-      else if (action === 'ACTION_A' || action === 'START') endChoice === 0 ? startQuiz() : onExit();
+      if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START') startQuiz();
       return;
     }
 
@@ -302,8 +301,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
       }
 
       if (gameState === 'COMPLETED') {
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setEndChoice((choice) => choice === 0 ? 1 : 0); }
-        else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); endChoice === 0 ? startQuiz() : onExit(); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startQuiz(); }
         return;
       }
 
@@ -360,14 +358,15 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
               <span className="text-[#58a6ff]">45s Timer Per Question</span>
             </div>
           </div>
+
+          {gameState !== 'COMPLETED' && <button
+            onClick={onExit}
+            className="px-3 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#f85149] text-xs font-mono-code text-[#8b949e] hover:text-[#f85149] transition-colors cursor-pointer"
+          >
+            Exit Game
+          </button>}
         </div>
 
-        <button
-          onClick={onExit}
-          className="px-3 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#f85149] text-xs font-mono-code text-[#8b949e] hover:text-[#f85149] transition-colors cursor-pointer"
-        >
-          Exit
-        </button>
       </div>
 
       {/* Main Game Container */}
@@ -665,7 +664,7 @@ export default function QuizGame({ remoteAction, isPaused, restartCounter, onExi
               </div>
             </div>
 
-            <EndGameActions selected={endChoice} onPlayAgain={startQuiz} onExit={onExit} />
+            <EndGameActions onPlayAgain={startQuiz} />
           </div>
         )}
       </div>

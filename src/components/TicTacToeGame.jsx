@@ -182,8 +182,7 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
     lastHandledTimeRef.current = timestamp || Date.now();
 
     if (winResult !== null) {
-      if (action === 'LEFT' || action === 'RIGHT') setEndChoice((choice) => choice === 0 ? 1 : 0);
-      else if (action === 'ACTION_A' || action === 'START') endChoice === 0 ? resetGame() : onExit();
+      if (action === 'ACTION_A' || action === 'ACTION_B' || action === 'START') resetGame();
       return;
     }
 
@@ -220,8 +219,7 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
       if (isPaused) return;
 
       if (winResult !== null) {
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setEndChoice((choice) => choice === 0 ? 1 : 0); }
-        else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); endChoice === 0 ? resetGame() : onExit(); }
+        if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); resetGame(); }
         return;
       }
 
@@ -278,13 +276,12 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
         </div>
 
         <div className="flex items-center gap-2">
-
-          <button
+          {!winResult && <button
             onClick={onExit}
             className="px-3 py-1.5 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-[#f85149] text-xs font-mono-code text-[#8b949e] hover:text-[#f85149] transition-colors cursor-pointer"
           >
-            Exit
-          </button>
+            Exit Game
+          </button>}
         </div>
       </div>
 
@@ -399,8 +396,8 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
                   </span>
                 )}
 
-                {/* Ghost preview on hover / cursor focus */}
-                {!val && !winResult && !isAiThinking && (isHovered || (isCursor && !val)) && (
+                {/* Ghost preview only follows a real pointer hover. */}
+                {!val && !winResult && !isAiThinking && isHovered && (
                   <span className={`opacity-20 font-black scale-90 transition-opacity ${turn === 'X' ? 'text-[#58a6ff]' : 'text-[#f85149]'}`}>
                     {turn === 'X' ? '✕' : '◯'}
                   </span>
@@ -410,7 +407,7 @@ export default function TicTacToeGame({ remoteAction, isPaused, restartCounter, 
           })}
         </div>
 
-        {winResult && <EndGameActions selected={endChoice} onPlayAgain={resetGame} onExit={onExit} />}
+        {winResult && <EndGameActions onPlayAgain={resetGame} />}
 
         {/* Action Controls & Hint Footer */}
         <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-[#30363d]/60 text-xs font-mono-code text-[#8b949e]">
