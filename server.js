@@ -13,7 +13,7 @@ import { mkdtemp, writeFile, rm } from 'fs/promises';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectPython = path.join(__dirname, 'air_game_pad_venv', 'bin', 'python');
-const pythonCommand = fs.existsSync(projectPython) ? projectPython : 'python3';
+const pythonCommand = process.env.PYTHON_COMMAND || (fs.existsSync(projectPython) ? projectPython : 'python3');
 
 const PORT = process.env.PORT || 3000;
 

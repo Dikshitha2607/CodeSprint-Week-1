@@ -24,3 +24,13 @@ The frontend is built with React, Vite, Tailwind CSS, Lucide icons, and Socket.I
 ## AI Tools Used
 
 The RAG quiz service uses the Groq API with `openai/gpt-oss-20b` to create five grounded multiple-choice questions from locally retrieved document text. Connect 4 also includes a small client-side weighted move-suggestion model that recommends a useful column without requiring a server call.
+
+## Render backend deployment
+
+Create the backend as a Render **Web Service** using this directory as its root directory:
+
+- Build Command: `npm run render-build`
+- Start Command: `npm start`
+- Environment variable: `GROQ_API_KEY` with the key from Groq
+
+The Render build command installs the Python packages in `requirements.txt` before building the frontend. Do not upload or commit `air_game_pad_venv`; the server uses Render's `python3` after those packages are installed. After changing the build command, trigger **Manual Deploy > Deploy latest commit** and check the build log for `Successfully installed ... pypdf`.
