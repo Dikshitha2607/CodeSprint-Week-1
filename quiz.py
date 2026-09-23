@@ -96,7 +96,8 @@ def retrieve_context(chunks, limit=6):
 def validate_quiz(quiz):
     questions = quiz.get('questions') if isinstance(quiz, dict) else None
     if not isinstance(questions, list) or len(questions) != 5:
-        raise ValueError('Groq returned an invalid quiz: exactly five questions are required.')
+        count = len(questions) if isinstance(questions, list) else 0
+        raise ValueError(f'Groq returned {count} questions; exactly five are required.')
     cleaned = []
     for question in questions:
         options = question.get('options') if isinstance(question, dict) else None
@@ -116,30 +117,37 @@ def generate(file_path):
     api_key = os.environ.get('GROQ_API_KEY')
     if not api_key:
         raise ValueError('GROQ_API_KEY is not configured. Add it to the local .env file.')
-    prompt = '''Create exactly 5 fair multiple-choice study questions using only the supplied document context. Return JSON only: {"questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}]}. Each question needs exactly four distinct options. answer is the zero-based correct-option index. Never use facts outside the context.\n\nDocument context:\n''' + context
-    payload = json.dumps({'model': os.environ.get('GROQ_MODEL', 'openai/gpt-oss-20b'), 'messages': [{'role': 'system', 'content': 'You create accurate grounded quizzes. Return valid JSON only.'}, {'role': 'user', 'content': prompt}], 'response_format': {'type': 'json_object'}, 'temperature': 0.2, 'max_tokens': 1800}).encode('utf-8')
-    # Groq's Cloudflare edge rejects Python's default "Python-urllib/..."
-    # signature with error 1010. Identify this application explicitly.
-    request = Request('https://api.groq.com/openai/v1/chat/completions', data=payload, headers={
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json',
-        'User-Agent': 'AirGamePad-RAG/1.0',
-    }, method='POST')
-    try:
-        with urlopen(request, timeout=90) as response:
-            result = json.loads(response.read().decode('utf-8'))
-    except HTTPError as error:
-        details = error.read().decode('utf-8', errors='replace')[:500]
-        raise ValueError(f'Groq request failed ({error.code}): {details}') from error
-    except URLError as error:
-        raise ValueError(f'Could not reach the Groq API: {error.reason}') from error
-    content = result.get('choices', [{}])[0].get('message', {}).get('content')
-    if not content:
-        raise ValueError('Groq returned an empty quiz response.')
-    try:
-        return validate_quiz(json.loads(content))
-    except json.JSONDecodeError as error:
-        raise ValueError('Groq returned invalid JSON. Please upload again.') from error
+    prompt = '''Create exactly 5 fair multiple-choice study questions using only the supplied document context. Return JSON only: {"questions":[{"question":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}]}. The questions array must contain exactly five items. Each question needs exactly four distinct options. answer is the zero-based correct-option index. Never use facts outside the context.\n\nDocument context:\n''' + context
+    model = os.environ.get('GROQ_MODEL', 'openai/gpt-oss-20b')
+
+    for attempt in range(2):
+        retry_instruction = '' if attempt == 0 else '\n\nYour previous response was invalid. Return exactly five complete questions now; do not omit or combine questions.'
+        payload = json.dumps({'model': model, 'messages': [{'role': 'system', 'content': 'You create accurate grounded quizzes. Return valid JSON only.'}, {'role': 'user', 'content': prompt + retry_instruction}], 'response_format': {'type': 'json_object'}, 'temperature': 0.2, 'max_tokens': 3000}).encode('utf-8')
+        # Groq's Cloudflare edge rejects Python's default "Python-urllib/..."
+        # signature with error 1010. Identify this application explicitly.
+        request = Request('https://api.groq.com/openai/v1/chat/completions', data=payload, headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+            'User-Agent': 'AirGamePad-RAG/1.0',
+        }, method='POST')
+        try:
+            with urlopen(request, timeout=90) as response:
+                result = json.loads(response.read().decode('utf-8'))
+        except HTTPError as error:
+            details = error.read().decode('utf-8', errors='replace')[:500]
+            raise ValueError(f'Groq request failed ({error.code}): {details}') from error
+        except URLError as error:
+            raise ValueError(f'Could not reach the Groq API: {error.reason}') from error
+        content = result.get('choices', [{}])[0].get('message', {}).get('content')
+        if not content:
+            raise ValueError('Groq returned an empty quiz response.')
+        try:
+            return validate_quiz(json.loads(content))
+        except (json.JSONDecodeError, ValueError) as error:
+            if attempt == 1:
+                if isinstance(error, json.JSONDecodeError):
+                    raise ValueError('Groq returned invalid JSON after two attempts. Please try again.') from error
+                raise
 
 
 if __name__ == '__main__':
