@@ -1796,7 +1796,7 @@ export default function App() {
     socket.on('device_left', (data) => {
       console.log('[Socket.io] Device left event received:', data);
       const view = currentViewRef.current;
-      if (view === 'lobby' || view === 'arena' || view === 'game_play') {
+      if (view === 'arena' || view === 'game_play') {
         console.log('[Room] Mobile controller device left room. Closing room and returning Host PC to landing page.');
         setCurrentView('landing');
         setRoomCode('');

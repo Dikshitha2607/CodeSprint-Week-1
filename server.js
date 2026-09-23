@@ -208,6 +208,12 @@ io.on('connection', (socket) => {
 
   // Create new room (Host PC creates lobby - waiting for user controller)
   socket.on('create_room', () => {
+    // A host can create another room after returning to the lobby. Leave the
+    // old room so stale controller disconnects cannot affect the new lobby.
+    if (socket.roomCode) {
+      socket.leave(socket.roomCode);
+      socket.roomCode = null;
+    }
     let newCode;
     do {
       newCode = generateRandomRoomCode();
